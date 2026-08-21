@@ -149,13 +149,14 @@
 
 <script>
 /* ---------- Ruta de prueba (editable) ---------- */
-// Importaciones Náutica S.A. y X-motor Europe Services S.L. no aparecen en el callejero:
-// se usa el centro del pueblo como aproximación (Campllong / Llambilles). Ajustar si hace falta.
+// Coordenadas a nivel de calle/finca (sin número exacto de nave, no localizable en el callejero):
+// Importaciones Náutica: Carrer del Camí de Fornells 13, 17459 Campllong
+// X-motor Europe: Can Xiu, 17243 Llambilles (masía en la zona de Pla del Bugantó)
 const ROUTE = [
-  {day:'Prueba', name:'Importaciones Náutica S.A.', type:'city', lat:41.8948831, lon:2.8309625, note:'Salida · Campllong (coordenada aproximada, centro del pueblo)', radius:0.6},
+  {day:'Prueba', name:'Importaciones Náutica S.A.', type:'city', lat:41.8984, lon:2.8314, note:'Salida · Camí de Fornells 13, Campllong (aproximado)', radius:0.4},
   {day:'Prueba', name:'Fornells de la Selva', type:'city', lat:41.9319675, lon:2.8090343, note:'', radius:0.6},
   {day:'Prueba', name:'Supermercado Esclat', type:'city', lat:41.9535682, lon:2.8105181, note:'C. Dalt de Can Turon, Carrer del Vuit de Març de 1908, 17003 Girona', radius:0.4},
-  {day:'Prueba', name:'X-motor Europe Services S.L.', type:'city', lat:41.9204519, lon:2.8540402, note:'Llegada · Llambilles (coordenada aproximada, centro del pueblo)', radius:0.6},
+  {day:'Prueba', name:'X-motor Europe Services S.L.', type:'city', lat:41.9136, lon:2.8525, note:'Llegada · Can Xiu, Llambilles (aproximado)', radius:0.4},
 ];
 
 const STORAGE_KEY = 'test_campllong_progress_idx';
