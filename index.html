@@ -92,6 +92,13 @@
   .me-dot{width:16px;height:16px;border-radius:50%; background:#3ecf8e; border:3px solid #fff; box-shadow:0 0 0 4px rgba(62,207,142,.3);}
   .wake-note{font-size:.68rem; color:var(--muted); text-align:center; margin-top:10px; line-height:1.4;}
 
+  .radar-alert{background:var(--card); border:1.5px solid var(--danger); border-radius:16px; padding:12px 16px; display:flex; align-items:center; gap:12px; margin-bottom:10px;}
+  .radar-alert .ra-icon{font-size:1.6rem; flex:none;}
+  .radar-alert .ra-body{flex:1; min-width:0;}
+  .radar-alert .ra-dist{font-size:1.2rem; font-weight:800; color:var(--danger);}
+  .radar-alert .ra-sub{font-size:.75rem; color:var(--muted); margin-top:1px;}
+  .radar-dot{width:22px;height:22px;border-radius:50%; background:var(--bg2); border:2px solid var(--danger); display:flex; align-items:center; justify-content:center; font-size:11px; box-shadow:0 1px 4px rgba(0,0,0,.4);}
+
   .nav-banner{background:linear-gradient(155deg,var(--card),var(--bg2)); border:1px solid var(--border); border-radius:20px; padding:16px 18px; display:flex; align-items:center; gap:16px; position:relative;}
   .nav-banner .nb-icon{flex:none; width:46px; height:46px; display:flex; align-items:center; justify-content:center; color:var(--accent);}
   .nav-banner .nb-icon svg{width:38px; height:38px;}
@@ -209,6 +216,14 @@
     <button class="btn" id="btnEnable">Activar ubicación</button>
   </div>
 
+  <div id="radarAlert" class="radar-alert" style="display:none;">
+    <div class="ra-icon">📷</div>
+    <div class="ra-body">
+      <div class="ra-dist" id="radarDist">—</div>
+      <div class="ra-sub" id="radarSpeed">Radar fijo</div>
+    </div>
+  </div>
+
   <div id="navBanner" class="nav-banner" style="display:none;">
     <button class="mode-btn" id="btnDrivingMode" title="Forzar modo conducción">A+</button>
     <div class="nb-icon" id="nbIcon"></div>
@@ -218,6 +233,7 @@
     </div>
     <button class="voice-btn on" id="btnVoice" title="Voz">🔊</button>
   </div>
+  <button class="btn small secondary" id="btnRecalc" style="display:none; width:100%; margin-top:8px;">🔄 Recalcular ruta desde aquí</button>
 
   <div id="mapCard" class="map-card" style="display:none;">
     <div id="mapViewport"><div id="map"></div></div>
@@ -262,6 +278,7 @@
 
   <footer>
     Los datos de la ruta y los puntos GPS son orientativos.<br>
+    Radares fijos según datos abiertos de OpenStreetMap (colaborativos, pueden estar incompletos o desactualizados).<br>
     <button id="btnReset">Reiniciar progreso de esta ruta</button>
   </footer>
 </div>
@@ -395,6 +412,9 @@ let mapRotateMode = false;
 let lastGpsHeading = null;
 let autoDriving = false;
 let manualDriving = false;
+let radarPoints = [];
+let radarMarkers = [];
+let radarAnnounced = new Set();
 
 /* ---------- Geometría ---------- */
 function toRad(d){return d*Math.PI/180;}
@@ -419,7 +439,7 @@ function toXY(lat, lon, lat0){
   return [(lon*Math.PI/180)*Math.cos(lat0*Math.PI/180)*R, (lat*Math.PI/180)*R];
 }
 function nearestOnRoute(model, lat, lon){
-  let best = {distToRoute:Infinity, cumDist:0};
+  let best = {distToRoute:Infinity, cumDist:0, lat, lon};
   const [px,py] = toXY(lat, lon, lat);
   for(let i=0;i<model.coords.length-1;i++){
     const [lat1,lon1] = model.coords[i], [lat2,lon2] = model.coords[i+1];
@@ -430,7 +450,12 @@ function nearestOnRoute(model, lat, lon){
     t = Math.max(0, Math.min(1, t));
     const dist = Math.hypot(px-(x1+t*dx), py-(y1+t*dy));
     if(dist < best.distToRoute){
-      best = {distToRoute:dist, cumDist: model.cum[i] + t*(model.cum[i+1]-model.cum[i])};
+      best = {
+        distToRoute:dist,
+        cumDist: model.cum[i] + t*(model.cum[i+1]-model.cum[i]),
+        lat: lat1 + t*(lat2-lat1),
+        lon: lon1 + t*(lon2-lon1)
+      };
     }
   }
   return best;
@@ -656,15 +681,18 @@ function drawRouteLine(coords){
   routeLine = L.polyline(coords, {color:'#ff7a45', weight:6, opacity:.85}).addTo(map);
 }
 
+let offRouteState = false;
 function updateNavBanner(){
   const banner = document.getElementById('navBanner');
   const iconEl = document.getElementById('nbIcon');
   const distEl = document.getElementById('nbDist');
   const textEl = document.getElementById('nbText');
+  const recalcBtn = document.getElementById('btnRecalc');
   banner.style.display = 'flex';
   banner.classList.remove('arrived');
 
   if(!routeModel){
+    recalcBtn.style.display = 'none';
     iconEl.innerHTML = routeError ? '⚠️' : svgDepart();
     distEl.textContent = routeRequestBusy ? 'Calculando…' : '—';
     textEl.textContent = routeRequestBusy ? 'Buscando la mejor ruta' : (routeError || 'Esperando posición GPS');
@@ -673,6 +701,26 @@ function updateNavBanner(){
   if(!lastPos) return;
 
   const near = nearestOnRoute(routeModel, lastPos.lat, lastPos.lon);
+
+  // Histéresis para no parpadear justo en el límite del corredor de la ruta
+  if(offRouteState){ if(near.distToRoute < 30){ offRouteState = false; spokenKeys.delete('offroute'); } }
+  else { if(near.distToRoute > 60) offRouteState = true; }
+
+  if(offRouteState){
+    recalcBtn.style.display = 'block';
+    const b = bearing(lastPos.lat, lastPos.lon, near.lat, near.lon);
+    const rel = lastGpsHeading !== null ? b - lastGpsHeading : b;
+    iconEl.innerHTML = svgArrow(rel);
+    distEl.textContent = fmtDist(near.distToRoute);
+    textEl.textContent = 'Te has desviado · vuelve a la ruta trazada';
+    if(!spokenKeys.has('offroute')){
+      spokenKeys.add('offroute');
+      speak('Te has desviado de la ruta. Vuelve al camino trazado.');
+    }
+    return;
+  }
+  recalcBtn.style.display = 'none';
+
   const upcoming = routeModel.maneuvers.find(mn => mn.cumDist > near.cumDist - 5);
   if(!upcoming){
     banner.classList.add('arrived');
@@ -693,19 +741,20 @@ function updateNavBanner(){
   maybeAnnounce(upcoming.idx, d.label, dist);
 }
 
-async function maybeRecomputeRoute(){
+async function maybeRecomputeRoute(force){
   if(!map || !lastPos || routeRequestBusy) return;
   const wp = ROUTE[currentIdx];
-  let needsRecompute = (currentIdx !== routedIdx) || !routeModel;
-  if(!needsRecompute){
-    const near = nearestOnRoute(routeModel, lastPos.lat, lastPos.lon);
-    if(near.distToRoute > 70) needsRecompute = true;
-  }
+  // La ruta se calcula una vez por destino, siempre desde la posición actual en ese momento,
+  // y se mantiene fija: si te desvías, updateNavBanner() te guía de vuelta a ella en vez de
+  // buscar un camino distinto. Solo se recalcula al cambiar de destino, si aún no hay ruta,
+  // o si el usuario lo pide explícitamente (force) tras un desvío grande.
+  const needsRecompute = force || (currentIdx !== routedIdx) || !routeModel;
   if(!needsRecompute) return;
 
   routedIdx = currentIdx;
   routeRequestBusy = true;
   routeError = null;
+  offRouteState = false;
   updateNavBanner();
   try{
     const osrmRoute = await fetchOsrmRoute(lastPos, wp);
@@ -764,6 +813,11 @@ function rebuildMapForRoute(){
   wpMarkers = [];
   if(routeLine){ map.removeLayer(routeLine); routeLine=null; }
   if(meMarker){ map.removeLayer(meMarker); meMarker=null; }
+  radarMarkers.forEach(m => map.removeLayer(m));
+  radarMarkers = [];
+  radarPoints = [];
+  radarAnnounced.clear();
+  document.getElementById('radarAlert').style.display = 'none';
 
   baseLine = L.polyline(ROUTE.map(w => [w.lat, w.lon]), {color:'#5aa9ff', weight:4, opacity:.75}).addTo(map);
   map.fitBounds(baseLine.getBounds(), {padding:[28,28]});
@@ -772,6 +826,85 @@ function rebuildMapForRoute(){
     radius:7, weight:2, color:'#fff', fillColor:'#93a5b3', fillOpacity:1
   }).addTo(map).bindPopup(wp.name));
   updateMapMarkers();
+  loadRadars();
+}
+
+/* ---------- Radares fijos (OpenStreetMap) ---------- */
+async function loadRadars(){
+  if(ROUTE.length < 1) return;
+  const cacheKey = 'radars_' + store.activeId;
+  try{
+    const cached = localStorage.getItem(cacheKey);
+    if(cached){
+      radarPoints = JSON.parse(cached);
+      renderRadarMarkers();
+      return;
+    }
+  }catch(e){}
+
+  const lats = ROUTE.map(w=>w.lat), lons = ROUTE.map(w=>w.lon);
+  const minLat = Math.min(...lats)-0.08, maxLat = Math.max(...lats)+0.08;
+  const minLon = Math.min(...lons)-0.08, maxLon = Math.max(...lons)+0.08;
+  const q = `[out:json][timeout:25];(node["highway"="speed_camera"](${minLat},${minLon},${maxLat},${maxLon});node["enforcement"="maxspeed"](${minLat},${minLon},${maxLat},${maxLon}););out body;`;
+  try{
+    const res = await fetch('https://overpass-api.de/api/interpreter', {
+      method:'POST', body:'data=' + encodeURIComponent(q)
+    });
+    const data = await res.json();
+    radarPoints = (data.elements||[]).map(e => ({
+      id:e.id, lat:e.lat, lon:e.lon, maxspeed: e.tags && e.tags.maxspeed ? e.tags.maxspeed : null
+    }));
+    try{ localStorage.setItem(cacheKey, JSON.stringify(radarPoints)); }catch(e){}
+  }catch(e){
+    radarPoints = [];
+  }
+  renderRadarMarkers();
+}
+
+function renderRadarMarkers(){
+  if(!map) return;
+  radarMarkers.forEach(m => map.removeLayer(m));
+  radarMarkers = radarPoints.map(r => {
+    const icon = L.divIcon({className:'', html:'<div class="radar-dot">📷</div>', iconSize:[22,22]});
+    return L.marker([r.lat, r.lon], {icon, zIndexOffset:500})
+      .addTo(map)
+      .bindPopup('Radar fijo' + (r.maxspeed ? ` · ${r.maxspeed} km/h` : ''));
+  });
+}
+
+function showRadarAlert(dist, maxspeed){
+  const el = document.getElementById('radarAlert');
+  el.style.display = 'flex';
+  document.getElementById('radarDist').textContent = fmtDist(dist);
+  document.getElementById('radarSpeed').textContent = maxspeed ? `Radar fijo · límite ${maxspeed} km/h` : 'Radar fijo';
+}
+function hideRadarAlert(){
+  document.getElementById('radarAlert').style.display = 'none';
+}
+function checkRadarAlerts(){
+  if(!radarPoints.length || !lastPos){ hideRadarAlert(); return; }
+  const ALERT_M = 700, VOICE_M = 500;
+  let closest = null, closestDist = Infinity;
+  radarPoints.forEach(r => {
+    const d = haversine(lastPos.lat, lastPos.lon, r.lat, r.lon) * 1000;
+    if(d > ALERT_M) return;
+    let ahead = true;
+    if(lastGpsHeading !== null){
+      const b = bearing(lastPos.lat, lastPos.lon, r.lat, r.lon);
+      const diff = Math.abs(((b - lastGpsHeading + 540) % 360) - 180);
+      ahead = diff < 70;
+    }
+    if(ahead && d < closestDist){ closestDist = d; closest = r; }
+  });
+  if(closest){
+    showRadarAlert(closestDist, closest.maxspeed);
+    if(!radarAnnounced.has(closest.id) && closestDist < VOICE_M){
+      radarAnnounced.add(closest.id);
+      speak('Radar fijo próximo' + (closest.maxspeed ? `, límite ${closest.maxspeed} kilómetros por hora` : ''));
+    }
+  } else {
+    hideRadarAlert();
+  }
 }
 
 function updateMapMarkers(){
@@ -1110,6 +1243,7 @@ function startWatch(){
     advanceIfClose();
     updateMePosition(lastPos.lat, lastPos.lon);
     applyMapRotation();
+    checkRadarAlerts();
     render();
     updateNavBanner();
     maybeRecomputeRoute();
@@ -1161,6 +1295,11 @@ document.getElementById('btnDrivingMode').addEventListener('click', () => {
   manualDriving = !manualDriving;
   document.getElementById('btnDrivingMode').classList.toggle('on', manualDriving);
   applyDrivingClass();
+});
+document.getElementById('btnRecalc').addEventListener('click', () => {
+  routeModel = null;
+  routedIdx = -1;
+  maybeRecomputeRoute(true);
 });
 document.getElementById('btnSkip').addEventListener('click', () => {
   if(currentIdx < ROUTE.length-1){
