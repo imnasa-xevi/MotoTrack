@@ -1,7 +1,7 @@
 {
-  "name": "Pirineos 2026 - Ruta en moto",
-  "short_name": "Pirineos 2026",
-  "description": "Siguiente destino de la ruta en moto por los Pirineos según la posición GPS",
+  "name": "Rutas Moto - Navegación GPS",
+  "short_name": "Rutas Moto",
+  "description": "Navegación paso a paso por GPS para tus rutas en moto, con voz, mapas offline y altimetría",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
