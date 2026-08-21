@@ -9,6 +9,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Prueba GPS">
 <meta name="theme-color" content="#0f1720">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <style>
   :root{
     --bg:#0f1720;
@@ -54,11 +55,20 @@
   .metric{flex:1; background:rgba(255,255,255,.03); border:1px solid var(--border); border-radius:14px; padding:10px 8px; text-align:center;}
   .metric .val{font-size:1.35rem; font-weight:800;}
   .metric .lbl{font-size:.65rem; color:var(--muted); text-transform:uppercase; letter-spacing:.5px; margin-top:2px;}
-  .compass-wrap{display:flex; align-items:center; justify-content:center; margin:14px 0;}
+  .compass-wrap{display:flex; flex-direction:column; align-items:center; justify-content:center; margin:14px 0;}
   #compass{width:120px;height:120px;}
   .arrow{transform-origin:60px 60px; transition:transform .25s ease-out;}
+  .heading-src{font-size:.68rem; color:var(--muted); margin-top:2px; text-align:center;}
   .actions{display:flex; gap:10px; margin-top:16px;}
   .actions .btn{flex:1;}
+
+  .map-card{background:var(--card); border:1px solid var(--border); border-radius:20px; padding:10px; margin-top:14px; position:relative;}
+  #map{height:220px; border-radius:14px; overflow:hidden; background:var(--bg2);}
+  .leaflet-control-attribution{font-size:9px !important;}
+  .follow-btn{position:absolute; right:20px; bottom:20px; z-index:1000; width:42px; height:42px; border-radius:50%; background:var(--accent); color:#1a0e07; font-size:1.1rem; display:flex; align-items:center; justify-content:center; box-shadow:0 2px 8px rgba(0,0,0,.4); border:none;}
+  .follow-btn.off{background:var(--bg2); color:var(--muted); border:1px solid var(--border);}
+  .me-dot{width:16px;height:16px;border-radius:50%; background:#3ecf8e; border:3px solid #fff; box-shadow:0 0 0 4px rgba(62,207,142,.3);}
+  .wake-note{font-size:.68rem; color:var(--muted); text-align:center; margin-top:10px; line-height:1.4;}
 
   .badge{display:inline-block; font-size:.65rem; font-weight:700; padding:3px 8px; border-radius:20px; text-transform:uppercase; letter-spacing:.5px;}
   .badge.stop{background:rgba(62,207,142,.15); color:var(--accent2);}
@@ -123,6 +133,7 @@
           <polygon points="60,20 70,64 60,54 50,64" fill="#ff7a45"/>
         </g>
       </svg>
+      <div class="heading-src" id="headingSrc">Buscando rumbo…</div>
     </div>
 
     <div class="metrics">
@@ -135,6 +146,13 @@
       <button class="btn" id="btnMaps">🗺️ Abrir en Maps</button>
       <button class="btn secondary" id="btnSkip">✓ Saltar</button>
     </div>
+
+    <div class="wake-note" id="wakeNote"></div>
+  </div>
+
+  <div id="mapCard" class="map-card" style="display:none;">
+    <div id="map"></div>
+    <button class="follow-btn" id="btnFollow" title="Seguir mi posición">🎯</button>
   </div>
 
   <div id="itinerary"></div>
@@ -147,6 +165,7 @@
 
 <div class="toast" id="toast"></div>
 
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 /* ---------- Ruta de prueba (editable) ---------- */
 // Coordenadas a nivel de calle/finca (sin número exacto de nave, no localizable en el callejero):
@@ -167,6 +186,10 @@ let lastPos = null;
 let watchId = null;
 let headingAvailable = false;
 let lastHeading = null;
+let lastGpsHeading = null;
+let wakeLock = null;
+let map = null, meMarker = null, wpMarkers = [];
+let followMode = true;
 
 const TYPE_LABEL = {stop:'Pernocta', city:'Punto', pass:'Puerto', food:'Comida'};
 
@@ -235,16 +258,76 @@ function renderNextCard(){
     document.getElementById('mDir').textContent = cardinal(b);
     document.getElementById('mAcc').textContent = lastPos.accuracy ? Math.round(lastPos.accuracy)+' m' : '—';
 
-    let rot = b;
-    if(headingAvailable && lastHeading !== null){
-      rot = b - lastHeading;
+    // Rumbo del dispositivo: se prioriza el rumbo GPS (dirección de desplazamiento, fiable en moto
+    // en marcha) sobre la brújula magnética (el motor/la electrónica la desvían con el vehículo parado).
+    const deviceHeading = (lastGpsHeading !== null) ? lastGpsHeading : (headingAvailable ? lastHeading : null);
+    const srcEl = document.getElementById('headingSrc');
+    if(deviceHeading !== null){
+      const rel = b - deviceHeading;
+      document.getElementById('arrow').setAttribute('transform', `rotate(${rel} 60 60)`);
+      srcEl.textContent = (lastGpsHeading !== null ? 'Rumbo GPS' : 'Brújula') + ' · la flecha indica hacia dónde girar';
+    } else {
+      document.getElementById('arrow').setAttribute('transform', `rotate(${b} 60 60)`);
+      srcEl.textContent = 'Sin rumbo aún · flecha = dirección desde el norte (avanza para obtener rumbo GPS)';
     }
-    document.getElementById('arrow').setAttribute('transform', `rotate(${rot} 60 60)`);
   } else {
     document.getElementById('mDist').textContent = '—';
     document.getElementById('mDir').textContent = '—';
     document.getElementById('mAcc').textContent = '—';
   }
+
+  updateMapMarkers();
+}
+
+/* ---------- Mini mapa ---------- */
+function initMap(){
+  if(map || typeof L === 'undefined') return;
+  document.getElementById('mapCard').style.display = 'block';
+  map = L.map('map', {zoomControl:false, attributionControl:true});
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom:18, attribution:'&copy; OpenStreetMap'
+  }).addTo(map);
+
+  const line = L.polyline(ROUTE.map(w => [w.lat, w.lon]), {color:'#5aa9ff', weight:4, opacity:.75}).addTo(map);
+  map.fitBounds(line.getBounds(), {padding:[28,28]});
+
+  wpMarkers = ROUTE.map((wp, i) => {
+    const m = L.circleMarker([wp.lat, wp.lon], {
+      radius:7, weight:2, color:'#fff', fillColor:'#93a5b3', fillOpacity:1
+    }).addTo(map).bindPopup(wp.name);
+    return m;
+  });
+
+  map.on('dragstart', () => setFollow(false));
+}
+
+function updateMapMarkers(){
+  if(!map) return;
+  wpMarkers.forEach((m, i) => {
+    if(i < currentIdx) m.setStyle({fillColor:'#3ecf8e', color:'#fff', radius:7});
+    else if(i === currentIdx) m.setStyle({fillColor:'#ff7a45', color:'#fff', radius:9});
+    else m.setStyle({fillColor:'#93a5b3', color:'#fff', radius:7});
+  });
+}
+
+function updateMePosition(lat, lon){
+  if(!map) return;
+  const icon = L.divIcon({className:'', html:'<div class="me-dot"></div>', iconSize:[16,16]});
+  if(!meMarker){
+    meMarker = L.marker([lat, lon], {icon, zIndexOffset:1000}).addTo(map);
+  } else {
+    meMarker.setLatLng([lat, lon]);
+  }
+  if(followMode){
+    map.setView([lat, lon], Math.max(map.getZoom(), 14), {animate:true});
+  }
+}
+
+function setFollow(on){
+  followMode = on;
+  const btn = document.getElementById('btnFollow');
+  btn.classList.toggle('off', !on);
+  if(on && lastPos) map.setView([lastPos.lat, lastPos.lon], Math.max(map.getZoom(),14));
 }
 
 function renderTimeline(){
@@ -295,17 +378,44 @@ function startWatch(){
     return;
   }
   document.getElementById('permCard').style.display = 'none';
+  initMap();
   watchId = navigator.geolocation.watchPosition(pos => {
     lastPos = {lat:pos.coords.latitude, lon:pos.coords.longitude, accuracy:pos.coords.accuracy};
+    const h = pos.coords.heading;
+    lastGpsHeading = (h !== null && h !== undefined && !isNaN(h)) ? h : null;
     document.getElementById('gpsDot').classList.add('live');
     document.getElementById('gpsText').textContent = 'GPS activo';
     advanceIfClose();
+    updateMePosition(lastPos.lat, lastPos.lon);
     render();
   }, err => {
     document.getElementById('gpsDot').classList.remove('live');
     document.getElementById('gpsText').textContent = 'Sin señal GPS (' + err.message + ')';
   }, {enableHighAccuracy:true, maximumAge:5000, timeout:20000});
 }
+
+/* ---------- Mantener la pantalla encendida ---------- */
+async function requestWakeLock(){
+  const note = document.getElementById('wakeNote');
+  if(!('wakeLock' in navigator)){
+    note.textContent = 'Este iPhone no soporta mantener la pantalla encendida automáticamente (necesita iOS 16.4+). Actívalo manualmente en Ajustes.';
+    return;
+  }
+  try{
+    wakeLock = await navigator.wakeLock.request('screen');
+    note.textContent = '🔆 Pantalla siempre encendida mientras uses la app';
+    wakeLock.addEventListener('release', () => {
+      note.textContent = 'La pantalla puede apagarse (se liberó el bloqueo)';
+    });
+  }catch(e){
+    note.textContent = 'No se pudo mantener la pantalla encendida: ' + e.message;
+  }
+}
+document.addEventListener('visibilitychange', async () => {
+  if(wakeLock !== null && document.visibilityState === 'visible'){
+    try{ wakeLock = await navigator.wakeLock.request('screen'); }catch(e){}
+  }
+});
 
 function startCompass(){
   if(typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function'){
@@ -330,7 +440,9 @@ function bindOrientation(){
 document.getElementById('btnEnable').addEventListener('click', () => {
   startWatch();
   startCompass();
+  requestWakeLock();
 });
+document.getElementById('btnFollow').addEventListener('click', () => setFollow(!followMode));
 document.getElementById('btnSkip').addEventListener('click', () => {
   if(currentIdx < ROUTE.length-1){
     currentIdx++;
@@ -346,6 +458,8 @@ document.getElementById('btnReset').addEventListener('click', () => {
     window.scrollTo({top:0});
   }
 });
+
+window.addEventListener('resize', () => { if(map) map.invalidateSize(); });
 
 render();
 </script>
