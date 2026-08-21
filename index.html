@@ -13,6 +13,7 @@
 <link rel="apple-touch-icon" href="icons/icon-180.png">
 <link rel="icon" href="icons/icon-192.png">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.css">
 <style>
   :root{
     --bg:#0f1720;
@@ -59,20 +60,31 @@
   .metric{flex:1; background:rgba(255,255,255,.03); border:1px solid var(--border); border-radius:14px; padding:10px 8px; text-align:center;}
   .metric .val{font-size:1.35rem; font-weight:800;}
   .metric .lbl{font-size:.65rem; color:var(--muted); text-transform:uppercase; letter-spacing:.5px; margin-top:2px;}
-  .compass-wrap{display:flex; flex-direction:column; align-items:center; justify-content:center; margin:14px 0;}
-  #compass{width:120px;height:120px;}
-  .arrow{transform-origin:60px 60px; transition:transform .25s ease-out;}
-  .heading-src{font-size:.68rem; color:var(--muted); margin-top:2px; text-align:center;}
   .actions{display:flex; gap:10px; margin-top:16px;}
   .actions .btn{flex:1;}
 
-  .map-card{background:var(--card); border:1px solid var(--border); border-radius:20px; padding:10px; margin-top:14px; position:relative;}
-  #map{height:220px; border-radius:14px; overflow:hidden; background:var(--bg2);}
+  .map-card{background:var(--card); border:1px solid var(--border); border-radius:20px; padding:10px; margin-top:8px; position:relative;}
+  #map{height:280px; border-radius:14px; overflow:hidden; background:var(--bg2);}
   .leaflet-control-attribution{font-size:9px !important;}
+  .leaflet-routing-container{display:none !important;}
   .follow-btn{position:absolute; right:20px; bottom:20px; z-index:1000; width:42px; height:42px; border-radius:50%; background:var(--accent); color:#1a0e07; font-size:1.1rem; display:flex; align-items:center; justify-content:center; box-shadow:0 2px 8px rgba(0,0,0,.4); border:none;}
   .follow-btn.off{background:var(--bg2); color:var(--muted); border:1px solid var(--border);}
   .me-dot{width:16px;height:16px;border-radius:50%; background:#3ecf8e; border:3px solid #fff; box-shadow:0 0 0 4px rgba(62,207,142,.3);}
   .wake-note{font-size:.68rem; color:var(--muted); text-align:center; margin-top:10px; line-height:1.4;}
+
+  .route-info{background:var(--card); border:1px solid var(--border); border-radius:16px; margin-top:10px; overflow:hidden;}
+  .route-info summary{list-style:none; cursor:pointer; padding:12px 16px; display:flex; align-items:center; justify-content:space-between; font-size:.85rem; font-weight:600;}
+  .route-info summary::-webkit-details-marker{display:none;}
+  .route-info summary .chev{color:var(--muted); transition:transform .2s;}
+  .route-info[open] summary .chev{transform:rotate(90deg);}
+  .route-info summary .sum-txt{color:var(--muted); font-weight:400; font-size:.78rem;}
+  .steps{list-style:none; margin:0; padding:0 16px 12px; max-height:260px; overflow-y:auto;}
+  .steps li{display:flex; gap:10px; padding:8px 0; border-top:1px solid var(--border); font-size:.82rem;}
+  .steps li:first-child{border-top:none;}
+  .steps li .step-ico{flex:none; width:22px; text-align:center; color:var(--pass);}
+  .steps li .step-txt{flex:1;}
+  .steps li .step-dist{flex:none; color:var(--muted); font-size:.72rem;}
+  .route-status{font-size:.72rem; color:var(--muted); text-align:center; padding:10px;}
 
   .badge{display:inline-block; font-size:.65rem; font-weight:700; padding:3px 8px; border-radius:20px; text-transform:uppercase; letter-spacing:.5px;}
   .badge.stop{background:rgba(62,207,142,.15); color:var(--accent2);}
@@ -123,21 +135,19 @@
     <button class="btn" id="btnEnable">Activar ubicación</button>
   </div>
 
+  <div id="mapCard" class="map-card" style="display:none;">
+    <div id="map"></div>
+    <button class="follow-btn" id="btnFollow" title="Seguir mi posición">🎯</button>
+  </div>
+  <details id="routeInfo" class="route-info" style="display:none;" open>
+    <summary><span>🧭 Indicaciones</span><span class="sum-txt" id="routeSummary">calculando…</span><span class="chev">▸</span></summary>
+    <ul class="steps" id="stepsList"></ul>
+  </details>
+
   <div id="nextCard" class="next-card" style="display:none;">
     <div class="kicker" id="nextDay">—</div>
     <h2 id="nextName">—</h2>
     <div class="place-note" id="nextNote">—</div>
-
-    <div class="compass-wrap">
-      <svg id="compass" viewBox="0 0 120 120">
-        <circle cx="60" cy="60" r="56" fill="none" stroke="#2b3d4d" stroke-width="2"/>
-        <text x="60" y="14" fill="#93a5b3" font-size="10" text-anchor="middle">N</text>
-        <g class="arrow" id="arrow">
-          <polygon points="60,20 70,64 60,54 50,64" fill="#ff7a45"/>
-        </g>
-      </svg>
-      <div class="heading-src" id="headingSrc">Buscando rumbo…</div>
-    </div>
 
     <div class="metrics">
       <div class="metric"><div class="val" id="mDist">—</div><div class="lbl">Distancia</div></div>
@@ -153,11 +163,6 @@
     <div class="wake-note" id="wakeNote"></div>
   </div>
 
-  <div id="mapCard" class="map-card" style="display:none;">
-    <div id="map"></div>
-    <button class="follow-btn" id="btnFollow" title="Seguir mi posición">🎯</button>
-  </div>
-
   <div id="itinerary"></div>
 
   <footer>
@@ -169,6 +174,7 @@
 <div class="toast" id="toast"></div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.js"></script>
 <script>
 /* ---------- Datos de la ruta (editable) ---------- */
 // type: stop = pernocta, city = paso/ciudad de referencia, pass = puerto de montaña, food = comida/cena destacada
@@ -217,12 +223,13 @@ if (isNaN(currentIdx) || currentIdx < 0 || currentIdx >= ROUTE.length) currentId
 
 let lastPos = null;
 let watchId = null;
-let headingAvailable = false;
-let lastHeading = null;
-let lastGpsHeading = null;
 let wakeLock = null;
 let map = null, meMarker = null, wpMarkers = [];
 let followMode = true;
+let routingControl = null;
+let routedIdx = -1;
+let routedFromPos = null;
+let routeRequestBusy = false;
 
 const TYPE_LABEL = {stop:'Pernocta', city:'Paso', pass:'Puerto', food:'Comida'};
 
@@ -290,19 +297,6 @@ function renderNextCard(){
     const b = bearing(lastPos.lat, lastPos.lon, wp.lat, wp.lon);
     document.getElementById('mDir').textContent = cardinal(b);
     document.getElementById('mAcc').textContent = lastPos.accuracy ? Math.round(lastPos.accuracy)+' m' : '—';
-
-    // Rumbo del dispositivo: se prioriza el rumbo GPS (dirección de desplazamiento, fiable en moto
-    // en marcha) sobre la brújula magnética (el motor/la electrónica la desvían con el vehículo parado).
-    const deviceHeading = (lastGpsHeading !== null) ? lastGpsHeading : (headingAvailable ? lastHeading : null);
-    const srcEl = document.getElementById('headingSrc');
-    if(deviceHeading !== null){
-      const rel = b - deviceHeading;
-      document.getElementById('arrow').setAttribute('transform', `rotate(${rel} 60 60)`);
-      srcEl.textContent = (lastGpsHeading !== null ? 'Rumbo GPS' : 'Brújula') + ' · la flecha indica hacia dónde girar';
-    } else {
-      document.getElementById('arrow').setAttribute('transform', `rotate(${b} 60 60)`);
-      srcEl.textContent = 'Sin rumbo aún · flecha = dirección desde el norte (avanza para obtener rumbo GPS)';
-    }
   } else {
     document.getElementById('mDist').textContent = '—';
     document.getElementById('mDir').textContent = '—';
@@ -310,12 +304,66 @@ function renderNextCard(){
   }
 
   updateMapMarkers();
+  maybeUpdateRoute();
+}
+
+/* ---------- Indicaciones por carretera (OSRM vía Leaflet Routing Machine) ---------- */
+const STEP_ICONS = {
+  'Head':'⬆️','Continue':'⬆️','Turn right':'↱','Turn left':'↰','Turn slight right':'↗️',
+  'Turn slight left':'↖️','Turn sharp right':'↘️','Turn sharp left':'↙️','Uturn':'↩️',
+  'Roundabout':'🔄','Arrive':'🏁','Merge':'⤵️','Fork':'🔀'
+};
+function iconFor(text){
+  for(const k in STEP_ICONS){ if(text.startsWith(k)) return STEP_ICONS[k]; }
+  return '➡️';
+}
+
+function maybeUpdateRoute(){
+  if(!map || !lastPos || routeRequestBusy) return;
+  const wp = ROUTE[currentIdx];
+  const movedEnough = !routedFromPos || haversine(routedFromPos.lat, routedFromPos.lon, lastPos.lat, lastPos.lon) > 0.3;
+  if(currentIdx === routedIdx && !movedEnough) return;
+
+  routedIdx = currentIdx;
+  routedFromPos = {lat:lastPos.lat, lon:lastPos.lon};
+  routeRequestBusy = true;
+  document.getElementById('routeSummary').textContent = 'calculando…';
+
+  if(routingControl){ map.removeControl(routingControl); routingControl = null; }
+  routingControl = L.Routing.control({
+    waypoints: [L.latLng(lastPos.lat, lastPos.lon), L.latLng(wp.lat, wp.lon)],
+    router: L.Routing.osrmv1({serviceUrl:'https://router.project-osrm.org/route/v1'}),
+    addWaypoints:false, draggableWaypoints:false, routeWhileDragging:false, fitSelectedRoutes:false,
+    show:false, createMarker:()=>null,
+    lineOptions:{styles:[{color:'#ff7a45', weight:6, opacity:.9}]}
+  }).addTo(map);
+
+  routingControl.on('routesfound', e => {
+    routeRequestBusy = false;
+    const r = e.routes[0];
+    const km = (r.summary.totalDistance/1000).toFixed(1);
+    const min = Math.round(r.summary.totalTime/60);
+    document.getElementById('routeSummary').textContent = `${km} km · ${min} min · ${r.instructions.length} pasos`;
+    const list = document.getElementById('stepsList');
+    list.innerHTML = r.instructions.map(ins => `
+      <li>
+        <span class="step-ico">${iconFor(ins.text)}</span>
+        <span class="step-txt">${ins.text}</span>
+        <span class="step-dist">${ins.distance > 0 ? (ins.distance>=1000?(ins.distance/1000).toFixed(1)+' km':Math.round(ins.distance)+' m') : ''}</span>
+      </li>`).join('');
+  });
+  routingControl.on('routingerror', () => {
+    routeRequestBusy = false;
+    document.getElementById('routeSummary').textContent = 'sin conexión para calcular indicaciones';
+    document.getElementById('stepsList').innerHTML = '';
+  });
 }
 
 /* ---------- Mini mapa ---------- */
 function initMap(){
   if(map || typeof L === 'undefined') return;
   document.getElementById('mapCard').style.display = 'block';
+  document.getElementById('routeInfo').style.display = 'block';
   map = L.map('map', {zoomControl:false, attributionControl:true});
   L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
     maxZoom:18, attribution:'&copy; OpenStreetMap'
@@ -414,8 +462,6 @@ function startWatch(){
   initMap();
   watchId = navigator.geolocation.watchPosition(pos => {
     lastPos = {lat:pos.coords.latitude, lon:pos.coords.longitude, accuracy:pos.coords.accuracy};
-    const h = pos.coords.heading;
-    lastGpsHeading = (h !== null && h !== undefined && !isNaN(h)) ? h : null;
     document.getElementById('gpsDot').classList.add('live');
     document.getElementById('gpsText').textContent = 'GPS activo';
     advanceIfClose();
@@ -450,29 +496,8 @@ document.addEventListener('visibilitychange', async () => {
   }
 });
 
-function startCompass(){
-  if(typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function'){
-    DeviceOrientationEvent.requestPermission().then(state => {
-      if(state === 'granted') bindOrientation();
-    }).catch(()=>{});
-  } else if('DeviceOrientationEvent' in window){
-    bindOrientation();
-  }
-}
-function bindOrientation(){
-  window.addEventListener('deviceorientation', e => {
-    let h = e.webkitCompassHeading;
-    if(h === undefined || h === null){
-      if(e.alpha !== null) h = 360 - e.alpha; else return;
-    }
-    headingAvailable = true;
-    lastHeading = h;
-  }, true);
-}
-
 document.getElementById('btnEnable').addEventListener('click', () => {
   startWatch();
-  startCompass();
   requestWakeLock();
 });
 document.getElementById('btnFollow').addEventListener('click', () => setFollow(!followMode));
