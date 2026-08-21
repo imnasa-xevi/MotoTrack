@@ -10,7 +10,6 @@
 <meta name="apple-mobile-web-app-title" content="Prueba GPS">
 <meta name="theme-color" content="#0f1720">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-<link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.css">
 <style>
   :root{
     --bg:#0f1720;
@@ -60,27 +59,20 @@
   .actions .btn{flex:1;}
 
   .map-card{background:var(--card); border:1px solid var(--border); border-radius:20px; padding:10px; margin-top:8px; position:relative;}
-  #map{height:280px; border-radius:14px; overflow:hidden; background:var(--bg2);}
+  #map{height:260px; border-radius:14px; overflow:hidden; background:var(--bg2);}
   .leaflet-control-attribution{font-size:9px !important;}
-  .leaflet-routing-container{display:none !important;}
   .follow-btn{position:absolute; right:20px; bottom:20px; z-index:1000; width:42px; height:42px; border-radius:50%; background:var(--accent); color:#1a0e07; font-size:1.1rem; display:flex; align-items:center; justify-content:center; box-shadow:0 2px 8px rgba(0,0,0,.4); border:none;}
   .follow-btn.off{background:var(--bg2); color:var(--muted); border:1px solid var(--border);}
   .me-dot{width:16px;height:16px;border-radius:50%; background:#3ecf8e; border:3px solid #fff; box-shadow:0 0 0 4px rgba(62,207,142,.3);}
   .wake-note{font-size:.68rem; color:var(--muted); text-align:center; margin-top:10px; line-height:1.4;}
 
-  .route-info{background:var(--card); border:1px solid var(--border); border-radius:16px; margin-top:10px; overflow:hidden;}
-  .route-info summary{list-style:none; cursor:pointer; padding:12px 16px; display:flex; align-items:center; justify-content:space-between; font-size:.85rem; font-weight:600;}
-  .route-info summary::-webkit-details-marker{display:none;}
-  .route-info summary .chev{color:var(--muted); transition:transform .2s;}
-  .route-info[open] summary .chev{transform:rotate(90deg);}
-  .route-info summary .sum-txt{color:var(--muted); font-weight:400; font-size:.78rem;}
-  .steps{list-style:none; margin:0; padding:0 16px 12px; max-height:260px; overflow-y:auto;}
-  .steps li{display:flex; gap:10px; padding:8px 0; border-top:1px solid var(--border); font-size:.82rem;}
-  .steps li:first-child{border-top:none;}
-  .steps li .step-ico{flex:none; width:22px; text-align:center; color:var(--pass);}
-  .steps li .step-txt{flex:1;}
-  .steps li .step-dist{flex:none; color:var(--muted); font-size:.72rem;}
-  .route-status{font-size:.72rem; color:var(--muted); text-align:center; padding:10px;}
+  .nav-banner{background:linear-gradient(155deg,#1f2f3d,#141f29); border:1px solid var(--border); border-radius:20px; padding:16px 18px; display:flex; align-items:center; gap:16px;}
+  .nav-banner .nb-icon{font-size:2.6rem; flex:none; width:60px; text-align:center; line-height:1;}
+  .nav-banner .nb-body{flex:1; min-width:0;}
+  .nav-banner .nb-dist{font-size:1.55rem; font-weight:800; line-height:1.15;}
+  .nav-banner .nb-text{font-size:.85rem; color:var(--muted); margin-top:2px;}
+  .nav-banner.arrived{background:linear-gradient(155deg,#173327,#0f1f19);}
+  .nav-banner.arrived .nb-dist{color:var(--accent2);}
 
   .badge{display:inline-block; font-size:.65rem; font-weight:700; padding:3px 8px; border-radius:20px; text-transform:uppercase; letter-spacing:.5px;}
   .badge.stop{background:rgba(62,207,142,.15); color:var(--accent2);}
@@ -132,14 +124,18 @@
     <button class="btn" id="btnEnable">Activar ubicación</button>
   </div>
 
+  <div id="navBanner" class="nav-banner" style="display:none;">
+    <div class="nb-icon" id="nbIcon">🧭</div>
+    <div class="nb-body">
+      <div class="nb-dist" id="nbDist">—</div>
+      <div class="nb-text" id="nbText">Calculando ruta…</div>
+    </div>
+  </div>
+
   <div id="mapCard" class="map-card" style="display:none;">
     <div id="map"></div>
     <button class="follow-btn" id="btnFollow" title="Seguir mi posición">🎯</button>
   </div>
-  <details id="routeInfo" class="route-info" style="display:none;" open>
-    <summary><span>🧭 Indicaciones</span><span class="sum-txt" id="routeSummary">calculando…</span><span class="chev">▸</span></summary>
-    <ul class="steps" id="stepsList"></ul>
-  </details>
 
   <div id="nextCard" class="next-card" style="display:none;">
     <div class="kicker" id="nextDay">—</div>
@@ -171,7 +167,6 @@
 <div class="toast" id="toast"></div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.js"></script>
 <script>
 /* ---------- Ruta de prueba (editable) ---------- */
 // Coordenadas a nivel de calle/finca (sin número exacto de nave, no localizable en el callejero):
@@ -191,12 +186,12 @@ if (isNaN(currentIdx) || currentIdx < 0 || currentIdx >= ROUTE.length) currentId
 let lastPos = null;
 let watchId = null;
 let wakeLock = null;
-let map = null, meMarker = null, wpMarkers = [];
+let map = null, meMarker = null, wpMarkers = [], routeLine = null;
 let followMode = true;
-let routingControl = null;
+let routeModel = null;
 let routedIdx = -1;
-let routedFromPos = null;
 let routeRequestBusy = false;
+let routeError = null;
 
 const TYPE_LABEL = {stop:'Pernocta', city:'Punto', pass:'Puerto', food:'Comida'};
 
@@ -271,66 +266,165 @@ function renderNextCard(){
   }
 
   updateMapMarkers();
-  maybeUpdateRoute();
 }
 
-/* ---------- Indicaciones por carretera (OSRM vía Leaflet Routing Machine) ---------- */
-const STEP_ICONS = {
-  'Head':'⬆️','Continue':'⬆️','Turn right':'↱','Turn left':'↰','Turn slight right':'↗️',
-  'Turn slight left':'↖️','Turn sharp right':'↘️','Turn sharp left':'↙️','Uturn':'↩️',
-  'Roundabout':'🔄','Arrive':'🏁','Merge':'⤵️','Fork':'🔀'
+/* ---------- Navegación giro a giro (OSRM directo) ---------- */
+const MOD_VISUAL = {
+  'uturn':       {icon:'↩️', verb:'Cambio de sentido'},
+  'sharp right': {icon:'↘️', verb:'Gira fuerte a la derecha'},
+  'right':       {icon:'➡️', verb:'Gira a la derecha'},
+  'slight right':{icon:'↗️', verb:'Sigue ligeramente a la derecha'},
+  'straight':    {icon:'⬆️', verb:'Sigue recto'},
+  'slight left': {icon:'↖️', verb:'Sigue ligeramente a la izquierda'},
+  'left':        {icon:'⬅️', verb:'Gira a la izquierda'},
+  'sharp left':  {icon:'↙️', verb:'Gira fuerte a la izquierda'},
 };
-function iconFor(text){
-  for(const k in STEP_ICONS){ if(text.startsWith(k)) return STEP_ICONS[k]; }
-  return '➡️';
+function maneuverVisual(type, modifier){
+  if(type === 'roundabout' || type === 'rotary' || type === 'roundabout turn') return {icon:'🔄', label:'Rotonda'};
+  if(type === 'exit roundabout' || type === 'exit rotary') return {icon:'↗️', label:'Sal de la rotonda'};
+  if(type === 'arrive') return {icon:'🏁', label:'Has llegado'};
+  if(type === 'depart') return {icon:'🚦', label:'Incorpórate a la vía'};
+  if(type === 'on ramp') return {icon:'↗️', label:'Toma la entrada'};
+  if(type === 'off ramp') return {icon:'↘️', label:'Toma la salida'};
+  if(type === 'fork') return {icon:'🔀', label:'Bifurcación: ' + (MOD_VISUAL[modifier]?.verb.toLowerCase() || 'sigue')};
+  const m = MOD_VISUAL[modifier] || MOD_VISUAL['straight'];
+  return {icon:m.icon, label:m.verb};
+}
+function describeManeuver(m){
+  const v = maneuverVisual(m.type, m.modifier);
+  let label = v.label;
+  if(m.type === 'roundabout' || m.type === 'rotary' || m.type === 'roundabout turn'){
+    if(m.exit) label += `, toma la ${m.exit}ª salida`;
+  } else if(m.name && !['arrive','depart'].includes(m.type)){
+    label += ` hacia ${m.name}`;
+  }
+  return {icon:v.icon, label};
+}
+function fmtDist(m){
+  if(m < 30) return 'Ahora';
+  if(m < 1000) return (Math.round(m/10)*10) + ' m';
+  return (m/1000).toFixed(1) + ' km';
 }
 
-function maybeUpdateRoute(){
+function toXY(lat, lon, lat0){
+  const R = 6371000;
+  return [(lon*Math.PI/180)*Math.cos(lat0*Math.PI/180)*R, (lat*Math.PI/180)*R];
+}
+function nearestOnRoute(model, lat, lon){
+  let best = {distToRoute:Infinity, cumDist:0};
+  const [px,py] = toXY(lat, lon, lat);
+  for(let i=0;i<model.coords.length-1;i++){
+    const [lat1,lon1] = model.coords[i], [lat2,lon2] = model.coords[i+1];
+    const [x1,y1] = toXY(lat1,lon1,lat), [x2,y2] = toXY(lat2,lon2,lat);
+    const dx=x2-x1, dy=y2-y1;
+    const len2 = dx*dx+dy*dy;
+    let t = len2>0 ? ((px-x1)*dx+(py-y1)*dy)/len2 : 0;
+    t = Math.max(0, Math.min(1, t));
+    const dist = Math.hypot(px-(x1+t*dx), py-(y1+t*dy));
+    if(dist < best.distToRoute){
+      best = {distToRoute:dist, cumDist: model.cum[i] + t*(model.cum[i+1]-model.cum[i])};
+    }
+  }
+  return best;
+}
+
+async function fetchOsrmRoute(from, to){
+  const url = `https://router.project-osrm.org/route/v1/driving/${from.lon},${from.lat};${to.lon},${to.lat}?geometries=geojson&overview=full&steps=true`;
+  const res = await fetch(url);
+  if(!res.ok) throw new Error('HTTP '+res.status);
+  const data = await res.json();
+  if(data.code !== 'Ok' || !data.routes?.length) throw new Error(data.code || 'sin ruta');
+  return data.routes[0];
+}
+
+function buildRouteModel(osrmRoute){
+  const coords = osrmRoute.geometry.coordinates.map(c => [c[1], c[0]]);
+  const cum = [0];
+  for(let i=1;i<coords.length;i++){
+    cum.push(cum[i-1] + haversine(coords[i-1][0],coords[i-1][1], coords[i][0],coords[i][1])*1000);
+  }
+  const steps = osrmRoute.legs[0].steps;
+  const maneuvers = [];
+  for(let i=1;i<steps.length;i++){
+    const st = steps[i];
+    const loc = st.maneuver.location;
+    let bestIdx=0, bestD=Infinity;
+    for(let j=0;j<coords.length;j++){
+      const dd = haversine(coords[j][0],coords[j][1], loc[1], loc[0]);
+      if(dd<bestD){ bestD=dd; bestIdx=j; }
+    }
+    maneuvers.push({type:st.maneuver.type, modifier:st.maneuver.modifier, exit:st.maneuver.exit, name:st.name, cumDist:cum[bestIdx]});
+  }
+  return {coords, cum, totalDist:cum[cum.length-1], maneuvers};
+}
+
+function drawRouteLine(coords){
+  if(routeLine) map.removeLayer(routeLine);
+  routeLine = L.polyline(coords, {color:'#ff7a45', weight:6, opacity:.85}).addTo(map);
+}
+
+function updateNavBanner(){
+  const banner = document.getElementById('navBanner');
+  const iconEl = document.getElementById('nbIcon');
+  const distEl = document.getElementById('nbDist');
+  const textEl = document.getElementById('nbText');
+  banner.style.display = 'flex';
+  banner.classList.remove('arrived');
+
+  if(!routeModel){
+    iconEl.textContent = routeError ? '⚠️' : '🧭';
+    distEl.textContent = routeRequestBusy ? 'Calculando…' : '—';
+    textEl.textContent = routeRequestBusy ? 'Buscando la mejor ruta' : (routeError || 'Esperando posición GPS');
+    return;
+  }
+  if(!lastPos) return;
+
+  const near = nearestOnRoute(routeModel, lastPos.lat, lastPos.lon);
+  const upcoming = routeModel.maneuvers.find(mn => mn.cumDist > near.cumDist - 5);
+  if(!upcoming){
+    banner.classList.add('arrived');
+    iconEl.textContent = '🏁';
+    distEl.textContent = fmtDist(Math.max(0, routeModel.totalDist - near.cumDist));
+    textEl.textContent = 'Has llegado a ' + ROUTE[currentIdx].name;
+    return;
+  }
+  const d = describeManeuver(upcoming);
+  iconEl.textContent = d.icon;
+  distEl.textContent = fmtDist(Math.max(0, upcoming.cumDist - near.cumDist));
+  textEl.textContent = d.label;
+}
+
+async function maybeRecomputeRoute(){
   if(!map || !lastPos || routeRequestBusy) return;
   const wp = ROUTE[currentIdx];
-  const movedEnough = !routedFromPos || haversine(routedFromPos.lat, routedFromPos.lon, lastPos.lat, lastPos.lon) > 0.3;
-  if(currentIdx === routedIdx && !movedEnough) return;
+  let needsRecompute = (currentIdx !== routedIdx) || !routeModel;
+  if(!needsRecompute){
+    const near = nearestOnRoute(routeModel, lastPos.lat, lastPos.lon);
+    if(near.distToRoute > 70) needsRecompute = true;
+  }
+  if(!needsRecompute) return;
 
   routedIdx = currentIdx;
-  routedFromPos = {lat:lastPos.lat, lon:lastPos.lon};
   routeRequestBusy = true;
-  document.getElementById('routeSummary').textContent = 'calculando…';
-
-  if(routingControl){ map.removeControl(routingControl); routingControl = null; }
-  routingControl = L.Routing.control({
-    waypoints: [L.latLng(lastPos.lat, lastPos.lon), L.latLng(wp.lat, wp.lon)],
-    router: L.Routing.osrmv1({serviceUrl:'https://router.project-osrm.org/route/v1'}),
-    addWaypoints:false, draggableWaypoints:false, routeWhileDragging:false, fitSelectedRoutes:false,
-    show:false, createMarker:()=>null,
-    lineOptions:{styles:[{color:'#ff7a45', weight:6, opacity:.9}]}
-  }).addTo(map);
-
-  routingControl.on('routesfound', e => {
-    routeRequestBusy = false;
-    const r = e.routes[0];
-    const km = (r.summary.totalDistance/1000).toFixed(1);
-    const min = Math.round(r.summary.totalTime/60);
-    document.getElementById('routeSummary').textContent = `${km} km · ${min} min · ${r.instructions.length} pasos`;
-    const list = document.getElementById('stepsList');
-    list.innerHTML = r.instructions.map(ins => `
-      <li>
-        <span class="step-ico">${iconFor(ins.text)}</span>
-        <span class="step-txt">${ins.text}</span>
-        <span class="step-dist">${ins.distance > 0 ? (ins.distance>=1000?(ins.distance/1000).toFixed(1)+' km':Math.round(ins.distance)+' m') : ''}</span>
-      </li>`).join('');
-  });
-  routingControl.on('routingerror', () => {
-    routeRequestBusy = false;
-    document.getElementById('routeSummary').textContent = 'sin conexión para calcular indicaciones';
-    document.getElementById('stepsList').innerHTML = '';
-  });
+  routeError = null;
+  updateNavBanner();
+  try{
+    const osrmRoute = await fetchOsrmRoute(lastPos, wp);
+    routeModel = buildRouteModel(osrmRoute);
+    drawRouteLine(routeModel.coords);
+  }catch(e){
+    routeModel = null;
+    routeError = 'Sin conexión para calcular indicaciones';
+  }
+  routeRequestBusy = false;
+  updateNavBanner();
 }
 
 /* ---------- Mini mapa ---------- */
 function initMap(){
   if(map || typeof L === 'undefined') return;
   document.getElementById('mapCard').style.display = 'block';
-  document.getElementById('routeInfo').style.display = 'block';
+  document.getElementById('navBanner').style.display = 'flex';
   map = L.map('map', {zoomControl:false, attributionControl:true});
   L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
     maxZoom:18, attribution:'&copy; OpenStreetMap'
@@ -413,6 +507,8 @@ function renderTimeline(){
       currentIdx = i;
       saveProgress();
       render();
+      updateNavBanner();
+      maybeRecomputeRoute();
       window.scrollTo({top:0, behavior:'smooth'});
     });
     dayList.appendChild(li);
@@ -434,6 +530,8 @@ function startWatch(){
     advanceIfClose();
     updateMePosition(lastPos.lat, lastPos.lon);
     render();
+    updateNavBanner();
+    maybeRecomputeRoute();
   }, err => {
     document.getElementById('gpsDot').classList.remove('live');
     document.getElementById('gpsText').textContent = 'Sin señal GPS (' + err.message + ')';
@@ -473,6 +571,8 @@ document.getElementById('btnSkip').addEventListener('click', () => {
     currentIdx++;
     saveProgress();
     render();
+    updateNavBanner();
+    maybeRecomputeRoute();
   }
 });
 document.getElementById('btnReset').addEventListener('click', () => {
