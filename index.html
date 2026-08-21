@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>Pirineos 2026</title>
+<meta name="description" content="Siguiente destino de la ruta en moto por los Pirineos según la posición GPS">
+<link rel="manifest" href="manifest.json">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Pirineos 2026">
+<meta name="theme-color" content="#0f1720">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="icon" href="icons/icon-192.png">
+<style>
+  :root{
+    --bg:#0f1720;
+    --bg2:#16212c;
+    --card:#1c2a37;
+    --border:#2b3d4d;
+    --text:#eef3f7;
+    --muted:#93a5b3;
+    --accent:#ff7a45;
+    --accent2:#3ecf8e;
+    --pass:#5aa9ff;
+    --danger:#ff5d5d;
+    font-size:16px;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",Helvetica,Arial,sans-serif;
+    height:100%; overscroll-behavior-y:none;}
+  body{padding-top:env(safe-area-inset-top); padding-bottom:env(safe-area-inset-bottom);}
+  #app{max-width:560px;margin:0 auto;padding:0 16px 40px;}
+
+  header{padding:18px 4px 10px; display:flex; align-items:baseline; justify-content:space-between;}
+  header h1{font-size:1.05rem; font-weight:700; margin:0; letter-spacing:.2px;}
+  header .sub{font-size:.78rem; color:var(--muted);}
+
+  .gps-bar{display:flex; align-items:center; gap:8px; font-size:.75rem; color:var(--muted); padding:2px 4px 14px;}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--danger); flex:none;}
+  .dot.live{background:var(--accent2); box-shadow:0 0 0 0 rgba(62,207,142,.6); animation:pulse 2s infinite;}
+  @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(62,207,142,.5);}70%{box-shadow:0 0 0 8px rgba(62,207,142,0);}100%{box-shadow:0 0 0 0 rgba(62,207,142,0);}}
+
+  .permcard{background:var(--card); border:1px solid var(--border); border-radius:16px; padding:18px; margin-bottom:16px; text-align:center;}
+  .permcard p{color:var(--muted); font-size:.85rem; line-height:1.4; margin:6px 0 14px;}
+  button{font:inherit; border:none; cursor:pointer; -webkit-appearance:none;}
+  .btn{background:var(--accent); color:#1a0e07; font-weight:700; padding:13px 20px; border-radius:12px; font-size:.95rem; width:100%;}
+  .btn:active{opacity:.8;}
+  .btn.secondary{background:var(--bg2); color:var(--text); border:1px solid var(--border);}
+  .btn.small{width:auto; padding:9px 14px; font-size:.8rem; border-radius:10px;}
+
+  .next-card{background:linear-gradient(155deg,var(--card),var(--bg2)); border:1px solid var(--border); border-radius:20px; padding:20px; position:relative; overflow:hidden;}
+  .next-card .kicker{font-size:.72rem; text-transform:uppercase; letter-spacing:1.2px; color:var(--accent); font-weight:700;}
+  .next-card h2{font-size:1.6rem; margin:6px 0 2px; line-height:1.15;}
+  .next-card .place-note{color:var(--muted); font-size:.85rem; margin-bottom:14px;}
+  .metrics{display:flex; gap:10px; margin:14px 0 6px;}
+  .metric{flex:1; background:rgba(255,255,255,.03); border:1px solid var(--border); border-radius:14px; padding:10px 8px; text-align:center;}
+  .metric .val{font-size:1.35rem; font-weight:800;}
+  .metric .lbl{font-size:.65rem; color:var(--muted); text-transform:uppercase; letter-spacing:.5px; margin-top:2px;}
+  .compass-wrap{display:flex; align-items:center; justify-content:center; margin:14px 0;}
+  #compass{width:120px;height:120px;}
+  .arrow{transform-origin:60px 60px; transition:transform .25s ease-out;}
+  .actions{display:flex; gap:10px; margin-top:16px;}
+  .actions .btn{flex:1;}
+
+  .badge{display:inline-block; font-size:.65rem; font-weight:700; padding:3px 8px; border-radius:20px; text-transform:uppercase; letter-spacing:.5px;}
+  .badge.stop{background:rgba(62,207,142,.15); color:var(--accent2);}
+  .badge.pass{background:rgba(90,169,255,.15); color:var(--pass);}
+  .badge.food{background:rgba(255,122,69,.15); color:var(--accent);}
+
+  .day-heading{font-size:.75rem; font-weight:800; text-transform:uppercase; letter-spacing:.8px; color:var(--muted); margin:22px 4px 8px; display:flex; justify-content:space-between;}
+
+  .timeline{list-style:none; margin:0; padding:0;}
+  .wp{display:flex; gap:12px; padding:10px 6px; border-radius:12px; align-items:center;}
+  .wp:active{background:rgba(255,255,255,.04);}
+  .wp .marker{width:26px; flex:none; display:flex; flex-direction:column; align-items:center; align-self:stretch;}
+  .wp .marker .pt{width:11px;height:11px;border-radius:50%; background:var(--border); border:2px solid var(--bg);}
+  .wp .marker .line{flex:1; width:2px; background:var(--border); margin:2px 0;}
+  .wp.done .marker .pt{background:var(--accent2);}
+  .wp.current .marker .pt{background:var(--accent); width:15px;height:15px; box-shadow:0 0 0 4px rgba(255,122,69,.2);}
+  .wp .info{flex:1; min-width:0; padding:2px 0;}
+  .wp .info .name{font-size:.92rem; font-weight:600;}
+  .wp.done .info .name{color:var(--muted); text-decoration:line-through; text-decoration-color:var(--border);}
+  .wp.current .info .name{color:var(--accent);}
+  .wp .info .note{font-size:.72rem; color:var(--muted); margin-top:1px;}
+  .wp .dist{font-size:.72rem; color:var(--muted); flex:none; text-align:right; min-width:52px;}
+
+  footer{margin-top:28px; text-align:center; color:var(--muted); font-size:.7rem; line-height:1.6;}
+  footer button{color:var(--muted); text-decoration:underline; background:none; padding:4px;}
+
+  .toast{position:fixed; left:50%; bottom:24px; transform:translateX(-50%) translateY(20px); background:#000; color:#fff; padding:10px 18px; border-radius:30px; font-size:.8rem; opacity:0; pointer-events:none; transition:all .25s; z-index:50; white-space:nowrap;}
+  .toast.show{opacity:.95; transform:translateX(-50%) translateY(0);}
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <div>
+      <h1>🏍️ Pirineos 2026</h1>
+      <div class="sub">Girona · Tourmalet · Venta de Juan Pito</div>
+    </div>
+  </header>
+
+  <div class="gps-bar">
+    <span class="dot" id="gpsDot"></span>
+    <span id="gpsText">GPS desactivado</span>
+  </div>
+
+  <div id="permCard" class="permcard">
+    <div style="font-size:2rem;">📍</div>
+    <p>Activa la ubicación para ver automáticamente cuál es el siguiente destino de la ruta según dónde estés.</p>
+    <button class="btn" id="btnEnable">Activar ubicación</button>
+  </div>
+
+  <div id="nextCard" class="next-card" style="display:none;">
+    <div class="kicker" id="nextDay">—</div>
+    <h2 id="nextName">—</h2>
+    <div class="place-note" id="nextNote">—</div>
+
+    <div class="compass-wrap">
+      <svg id="compass" viewBox="0 0 120 120">
+        <circle cx="60" cy="60" r="56" fill="none" stroke="#2b3d4d" stroke-width="2"/>
+        <text x="60" y="14" fill="#93a5b3" font-size="10" text-anchor="middle">N</text>
+        <g class="arrow" id="arrow">
+          <polygon points="60,20 70,64 60,54 50,64" fill="#ff7a45"/>
+        </g>
+      </svg>
+    </div>
+
+    <div class="metrics">
+      <div class="metric"><div class="val" id="mDist">—</div><div class="lbl">Distancia</div></div>
+      <div class="metric"><div class="val" id="mDir">—</div><div class="lbl">Dirección</div></div>
+      <div class="metric"><div class="val" id="mAcc">—</div><div class="lbl">Precisión GPS</div></div>
+    </div>
+
+    <div class="actions">
+      <button class="btn" id="btnMaps">🗺️ Abrir en Maps</button>
+      <button class="btn secondary" id="btnSkip">✓ Saltar</button>
+    </div>
+  </div>
+
+  <div id="itinerary"></div>
+
+  <footer>
+    Los datos de la ruta y los puntos GPS son orientativos.<br>
+    <button id="btnReset">Reiniciar progreso de la ruta</button>
+  </footer>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* ---------- Datos de la ruta (editable) ---------- */
+// type: stop = pernocta, city = paso/ciudad de referencia, pass = puerto de montaña, food = comida/cena destacada
+const ROUTE = [
+  {day:'Mar 1 · Girona → Vielha', name:'Girona (salida)', type:'city', lat:41.9794, lon:2.8214, note:'Salida 08:00', radius:3},
+  {day:'Mar 1 · Girona → Vielha', name:'Olot', type:'city', lat:42.1817, lon:2.4900, note:'Parada corta opcional', radius:3},
+  {day:'Mar 1 · Girona → Vielha', name:'Ripoll', type:'city', lat:42.1996, lon:2.1904, note:'Parada corta opcional', radius:3},
+  {day:'Mar 1 · Girona → Vielha', name:'Puigcerdà', type:'city', lat:42.4326, lon:1.9284, note:'', radius:3},
+  {day:'Mar 1 · Girona → Vielha', name:"La Seu d'Urgell", type:'city', lat:42.3585, lon:1.4593, note:'', radius:3},
+  {day:'Mar 1 · Girona → Vielha', name:'Sort', type:'city', lat:42.4131, lon:1.1290, note:'Comida ligera', radius:3},
+  {day:'Mar 1 · Girona → Vielha', name:"Esterri d'Àneu", type:'city', lat:42.6178, lon:1.1240, note:'', radius:3},
+  {day:'Mar 1 · Girona → Vielha', name:'Port de la Bonaigua', type:'pass', lat:42.6784, lon:0.9880, note:'1.700 m aprox · lo mejor del día', radius:1.5},
+  {day:'Mar 1 · Girona → Vielha', name:'Vielha', type:'stop', lat:42.7027, lon:0.7967, note:'Noche · Hotel Eth Pomer / Anglada', radius:2},
+
+  {day:'Mié 2 · Vielha → Laruns (etapa reina)', name:'Bagnères-de-Luchon', type:'city', lat:42.7897, lon:0.5951, note:'', radius:2},
+  {day:'Mié 2 · Vielha → Laruns (etapa reina)', name:'Col de Peyresourde', type:'pass', lat:42.7967, lon:0.4514, note:'1.569 m · parada 10-15 min', radius:1},
+  {day:'Mié 2 · Vielha → Laruns (etapa reina)', name:"Col d'Aspin", type:'pass', lat:42.9309, lon:0.3272, note:'1.489 m · parada 10 min', radius:1},
+  {day:'Mié 2 · Vielha → Laruns (etapa reina)', name:'Col du Tourmalet', type:'pass', lat:42.9106, lon:0.1443, note:'2.115 m · parada 30-45 min · el gran puerto', radius:1},
+  {day:'Mié 2 · Vielha → Laruns (etapa reina)', name:'Luz-Saint-Sauveur', type:'city', lat:42.8756, lon:-0.0044, note:'Zona para comer', radius:2},
+  {day:'Mié 2 · Vielha → Laruns (etapa reina)', name:'Col du Soulor', type:'pass', lat:42.9814, lon:-0.2278, note:'1.474 m · parada 10 min', radius:1},
+  {day:'Mié 2 · Vielha → Laruns (etapa reina)', name:"Col d'Aubisque", type:'pass', lat:42.9847, lon:-0.3392, note:'1.709 m · parada 20-30 min', radius:1},
+  {day:'Mié 2 · Vielha → Laruns (etapa reina)', name:'Eaux-Chaudes / Laruns', type:'stop', lat:42.9861, lon:-0.4139, note:'Noche · Auberge La Caverne', radius:2},
+
+  {day:'Jue 3 · Laruns → Isaba', name:'Col du Pourtalet', type:'pass', lat:42.8083, lon:-0.4394, note:'Gran puerto del día', radius:1},
+  {day:'Jue 3 · Laruns → Isaba', name:'Formigal', type:'city', lat:42.7739, lon:-0.3697, note:'', radius:2},
+  {day:'Jue 3 · Laruns → Isaba', name:'Jaca', type:'city', lat:42.5709, lon:-0.5498, note:'Repostar aquí', radius:3},
+  {day:'Jue 3 · Laruns → Isaba', name:'Hecho', type:'city', lat:42.7280, lon:-0.7460, note:'', radius:2},
+  {day:'Jue 3 · Laruns → Isaba', name:'Ansó', type:'city', lat:42.7570, lon:-0.7860, note:'', radius:2},
+  {day:'Jue 3 · Laruns → Isaba', name:'Roncal', type:'city', lat:42.7896, lon:-0.9502, note:'', radius:2},
+  {day:'Jue 3 · Laruns → Isaba', name:'Isaba', type:'stop', lat:42.8760, lon:-0.8825, note:'Noche · Hostal Lola / SNO Isaba', radius:2},
+  {day:'Jue 3 · Laruns → Isaba', name:'Puerto de Belagua', type:'pass', lat:42.9880, lon:-0.7580, note:'Camino a la Venta', radius:1.5},
+  {day:'Jue 3 · Laruns → Isaba', name:'Venta de Juan Pito', type:'food', lat:42.9840, lon:-0.7550, note:'Comida 13:30-14:00 · coordenadas aproximadas, verificar antes de salir', radius:1},
+
+  {day:'Vie 4 · Regreso a Girona', name:'Sabiñánigo', type:'city', lat:42.5192, lon:-0.3609, note:'', radius:3},
+  {day:'Vie 4 · Regreso a Girona', name:'Aínsa', type:'city', lat:42.4167, lon:0.1391, note:'', radius:3},
+  {day:'Vie 4 · Regreso a Girona', name:'Campo', type:'city', lat:42.4181, lon:0.3592, note:'', radius:3},
+  {day:'Vie 4 · Regreso a Girona', name:'Benabarre', type:'city', lat:42.1023, lon:0.4783, note:'', radius:3},
+  {day:'Vie 4 · Regreso a Girona', name:'Tremp', type:'city', lat:42.1662, lon:0.8946, note:'', radius:3},
+  {day:'Vie 4 · Regreso a Girona', name:'Ponts', type:'city', lat:41.9127, lon:1.1913, note:'', radius:3},
+  {day:'Vie 4 · Regreso a Girona', name:'Girona (llegada)', type:'city', lat:41.9794, lon:2.8214, note:'Fin de la ruta', radius:3},
+];
+
+const STORAGE_KEY = 'pirineos2026_progress_idx';
+let currentIdx = parseInt(localStorage.getItem(STORAGE_KEY) || '0', 10);
+if (isNaN(currentIdx) || currentIdx < 0 || currentIdx >= ROUTE.length) currentIdx = 0;
+
+let lastPos = null;
+let watchId = null;
+let headingAvailable = false;
+let lastHeading = null;
+
+const TYPE_LABEL = {stop:'Pernocta', city:'Paso', pass:'Puerto', food:'Comida'};
+
+function toRad(d){return d*Math.PI/180;}
+function toDeg(r){return r*180/Math.PI;}
+
+function haversine(lat1,lon1,lat2,lon2){
+  const R=6371;
+  const dLat=toRad(lat2-lat1), dLon=toRad(lon2-lon1);
+  const a=Math.sin(dLat/2)**2 + Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLon/2)**2;
+  return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+}
+function bearing(lat1,lon1,lat2,lon2){
+  const y=Math.sin(toRad(lon2-lon1))*Math.cos(toRad(lat2));
+  const x=Math.cos(toRad(lat1))*Math.sin(toRad(lat2)) - Math.sin(toRad(lat1))*Math.cos(toRad(lat2))*Math.cos(toRad(lon2-lon1));
+  return (toDeg(Math.atan2(y,x))+360)%360;
+}
+function cardinal(deg){
+  const dirs=['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSO','SO','OSO','O','ONO','NO','NNO'];
+  return dirs[Math.round(deg/22.5)%16];
+}
+
+function showToast(msg){
+  const t=document.getElementById('toast');
+  t.textContent=msg;
+  t.classList.add('show');
+  setTimeout(()=>t.classList.remove('show'), 2200);
+}
+
+function saveProgress(){
+  localStorage.setItem(STORAGE_KEY, String(currentIdx));
+}
+
+function advanceIfClose(){
+  if(!lastPos) return;
+  const wp = ROUTE[currentIdx];
+  if(!wp) return;
+  const d = haversine(lastPos.lat, lastPos.lon, wp.lat, wp.lon);
+  if(d <= wp.radius && currentIdx < ROUTE.length-1){
+    currentIdx++;
+    saveProgress();
+    showToast('✓ ' + wp.name + ' — siguiente: ' + ROUTE[currentIdx].name);
+  }
+}
+
+function render(){
+  renderNextCard();
+  renderTimeline();
+}
+
+function renderNextCard(){
+  const wp = ROUTE[currentIdx];
+  document.getElementById('nextCard').style.display = 'block';
+  document.getElementById('nextDay').textContent = wp.day + ' · ' + TYPE_LABEL[wp.type];
+  document.getElementById('nextName').textContent = wp.name;
+  document.getElementById('nextNote').textContent = wp.note || '';
+
+  document.getElementById('btnMaps').onclick = () => {
+    window.location.href = `https://maps.apple.com/?daddr=${wp.lat},${wp.lon}&dirflg=d`;
+  };
+
+  if(lastPos){
+    const d = haversine(lastPos.lat, lastPos.lon, wp.lat, wp.lon);
+    document.getElementById('mDist').textContent = d < 1 ? Math.round(d*1000)+' m' : d.toFixed(1)+' km';
+    const b = bearing(lastPos.lat, lastPos.lon, wp.lat, wp.lon);
+    document.getElementById('mDir').textContent = cardinal(b);
+    document.getElementById('mAcc').textContent = lastPos.accuracy ? Math.round(lastPos.accuracy)+' m' : '—';
+
+    let rot = b;
+    if(headingAvailable && lastHeading !== null){
+      rot = b - lastHeading;
+    }
+    document.getElementById('arrow').setAttribute('transform', `rotate(${rot} 60 60)`);
+  } else {
+    document.getElementById('mDist').textContent = '—';
+    document.getElementById('mDir').textContent = '—';
+    document.getElementById('mAcc').textContent = '—';
+  }
+}
+
+function renderTimeline(){
+  const container = document.getElementById('itinerary');
+  container.innerHTML = '';
+  let lastDay = null;
+  let dayList = null;
+
+  ROUTE.forEach((wp, i) => {
+    if(wp.day !== lastDay){
+      lastDay = wp.day;
+      const h = document.createElement('div');
+      h.className = 'day-heading';
+      h.innerHTML = `<span>${wp.day}</span>`;
+      container.appendChild(h);
+      dayList = document.createElement('ul');
+      dayList.className = 'timeline';
+      container.appendChild(dayList);
+    }
+    const li = document.createElement('li');
+    li.className = 'wp' + (i < currentIdx ? ' done' : '') + (i === currentIdx ? ' current' : '');
+    const distTxt = lastPos ? (() => {
+      const d = haversine(lastPos.lat, lastPos.lon, wp.lat, wp.lon);
+      return d < 1 ? Math.round(d*1000)+' m' : d.toFixed(1)+' km';
+    })() : '';
+    li.innerHTML = `
+      <div class="marker"><div class="pt"></div>${i < ROUTE.length-1 ? '<div class="line"></div>' : ''}</div>
+      <div class="info">
+        <div class="name">${wp.name} <span class="badge ${wp.type}">${TYPE_LABEL[wp.type]}</span></div>
+        <div class="note">${wp.note || ''}</div>
+      </div>
+      <div class="dist">${distTxt}</div>
+    `;
+    li.addEventListener('click', () => {
+      currentIdx = i;
+      saveProgress();
+      render();
+      window.scrollTo({top:0, behavior:'smooth'});
+    });
+    dayList.appendChild(li);
+  });
+}
+
+/* ---------- Geolocalización ---------- */
+function startWatch(){
+  if(!('geolocation' in navigator)){
+    showToast('Este dispositivo no soporta geolocalización');
+    return;
+  }
+  document.getElementById('permCard').style.display = 'none';
+  watchId = navigator.geolocation.watchPosition(pos => {
+    lastPos = {lat:pos.coords.latitude, lon:pos.coords.longitude, accuracy:pos.coords.accuracy};
+    document.getElementById('gpsDot').classList.add('live');
+    document.getElementById('gpsText').textContent = 'GPS activo';
+    advanceIfClose();
+    render();
+  }, err => {
+    document.getElementById('gpsDot').classList.remove('live');
+    document.getElementById('gpsText').textContent = 'Sin señal GPS (' + err.message + ')';
+  }, {enableHighAccuracy:true, maximumAge:5000, timeout:20000});
+}
+
+function startCompass(){
+  if(typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function'){
+    DeviceOrientationEvent.requestPermission().then(state => {
+      if(state === 'granted') bindOrientation();
+    }).catch(()=>{});
+  } else if('DeviceOrientationEvent' in window){
+    bindOrientation();
+  }
+}
+function bindOrientation(){
+  window.addEventListener('deviceorientation', e => {
+    let h = e.webkitCompassHeading;
+    if(h === undefined || h === null){
+      if(e.alpha !== null) h = 360 - e.alpha; else return;
+    }
+    headingAvailable = true;
+    lastHeading = h;
+  }, true);
+}
+
+document.getElementById('btnEnable').addEventListener('click', () => {
+  startWatch();
+  startCompass();
+});
+document.getElementById('btnSkip').addEventListener('click', () => {
+  if(currentIdx < ROUTE.length-1){
+    currentIdx++;
+    saveProgress();
+    render();
+  }
+});
+document.getElementById('btnReset').addEventListener('click', () => {
+  if(confirm('¿Reiniciar el progreso de la ruta desde el principio?')){
+    currentIdx = 0;
+    saveProgress();
+    render();
+    window.scrollTo({top:0});
+  }
+});
+
+render();
+
+if('serviceWorker' in navigator){
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').catch(()=>{});
+  });
+}
+</script>
+</body>
+</html>
