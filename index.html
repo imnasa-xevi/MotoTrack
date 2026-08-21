@@ -99,6 +99,27 @@
   .radar-alert .ra-sub{font-size:.75rem; color:var(--muted); margin-top:1px;}
   .radar-dot{width:22px;height:22px;border-radius:50%; background:var(--bg2); border:2px solid var(--danger); display:flex; align-items:center; justify-content:center; font-size:11px; box-shadow:0 1px 4px rgba(0,0,0,.4);}
 
+  .speed-alert{background:var(--card); border:1.5px solid var(--danger); border-radius:16px; padding:12px 16px; display:flex; align-items:center; gap:12px; margin-bottom:10px;}
+  .speed-alert .sp-icon{font-size:1.6rem; flex:none;}
+  .speed-alert .sp-body{flex:1; min-width:0;}
+  .speed-alert .sp-now{font-size:1.2rem; font-weight:800; color:var(--danger);}
+  .speed-alert .sp-sub{font-size:.75rem; color:var(--muted); margin-top:1px;}
+
+  .fuel-alert{background:var(--card); border:1.5px solid var(--accent); border-radius:16px; padding:12px 16px; display:flex; align-items:center; gap:12px; margin-bottom:10px;}
+  .fuel-alert .fa-icon{font-size:1.6rem; flex:none;}
+  .fuel-alert .fa-body{flex:1; min-width:0; font-size:.8rem; color:var(--text);}
+
+  .weather-chip{display:inline-flex; align-items:center; gap:4px; font-size:.72rem; color:var(--muted); margin-top:4px; background:var(--bg2); border:1px solid var(--border); border-radius:10px; padding:3px 8px;}
+  .badge.fuel{background:rgba(232,99,42,.15); color:var(--accent);}
+
+  .route-tools{display:flex; gap:8px; margin-top:6px;}
+  .route-tools button{background:var(--bg2); border:1px solid var(--border); color:var(--text); width:32px; height:32px; border-radius:50%; font-size:.85rem;}
+  .track-card{background:var(--card); border:1px solid var(--border); border-radius:16px; padding:14px; margin-top:10px;}
+  .track-card .tc-row{display:flex; align-items:center; justify-content:space-between; gap:10px;}
+  .track-card .tc-info{font-size:.75rem; color:var(--muted);}
+  .track-actions{display:flex; gap:8px; margin-top:10px;}
+  .track-actions .btn{flex:1;}
+
   .nav-banner{background:linear-gradient(155deg,var(--card),var(--bg2)); border:1px solid var(--border); border-radius:20px; padding:16px 18px; display:flex; align-items:center; gap:16px; position:relative;}
   .nav-banner .nb-icon{flex:none; width:46px; height:46px; display:flex; align-items:center; justify-content:center; color:var(--accent);}
   .nav-banner .nb-icon svg{width:38px; height:38px;}
@@ -216,12 +237,25 @@
     <button class="btn" id="btnEnable">Activar ubicación</button>
   </div>
 
+  <div id="speedAlert" class="speed-alert" style="display:none;">
+    <div class="sp-icon">⚠️</div>
+    <div class="sp-body">
+      <div class="sp-now" id="speedNow">—</div>
+      <div class="sp-sub" id="speedLimitTxt">Límite —</div>
+    </div>
+  </div>
+
   <div id="radarAlert" class="radar-alert" style="display:none;">
     <div class="ra-icon">📷</div>
     <div class="ra-body">
       <div class="ra-dist" id="radarDist">—</div>
       <div class="ra-sub" id="radarSpeed">Radar fijo</div>
     </div>
+  </div>
+
+  <div id="fuelAlert" class="fuel-alert" style="display:none;">
+    <div class="fa-icon">⛽</div>
+    <div class="fa-body" id="fuelText">Llevas un buen tramo sin repostar</div>
   </div>
 
   <div id="navBanner" class="nav-banner" style="display:none;">
@@ -247,6 +281,17 @@
       <div class="dl-bar"><div class="dl-fill" id="dlFill"></div></div>
       <div class="dl-status" id="dlStatus">Preparando…</div>
       <button class="btn small secondary" id="btnCancelDl" style="display:none;">Cancelar</button>
+    </div>
+  </div>
+
+  <div id="trackCard" class="track-card" style="display:none;">
+    <div class="tc-row">
+      <div class="tc-info" id="trackInfo">Trayecto no grabado</div>
+      <button class="btn small secondary" id="btnTrackToggle">🔴 Grabar trayecto</button>
+    </div>
+    <div class="track-actions" id="trackActions" style="display:none;">
+      <button class="btn small secondary" id="btnTrackExport">📤 Exportar GPX</button>
+      <button class="btn small secondary" id="btnTrackClear">🗑️ Borrar</button>
     </div>
   </div>
 
@@ -287,7 +332,11 @@
   <div class="sheet">
     <div class="sheet-head"><h3>Tus rutas</h3><button class="sheet-close" id="closeRoutes">✕</button></div>
     <div id="routesList"></div>
-    <button class="btn" id="btnNewRoute" style="margin-top:6px;">+ Nueva ruta</button>
+    <div class="route-tools" style="justify-content:center; margin-top:4px;">
+      <button class="btn" id="btnNewRoute" style="width:auto; flex:1;">+ Nueva ruta</button>
+      <button class="btn secondary" id="btnImportRoute" style="width:auto; flex:1;">📥 Importar</button>
+    </div>
+    <input type="file" id="importFile" accept=".json,.gpx" style="display:none;">
   </div>
 </div>
 
@@ -339,7 +388,7 @@ const PIRINEOS_WAYPOINTS = [
   {day:'Jue 3 · Laruns → Isaba', name:'Col du Pourtalet', type:'pass', lat:42.8083, lon:-0.4394, note:'Gran puerto del día', radius:1,
     photo:'https://commons.wikimedia.org/wiki/Special:FilePath/Ancien_poste_fronti%C3%A8re_au_col_du_Pourtalet_%28c%C3%B4t%C3%A9_espagnol%29.jpg?width=480', photoCredit:'Foto: Wikimedia Commons'},
   {day:'Jue 3 · Laruns → Isaba', name:'Formigal', type:'city', lat:42.7739, lon:-0.3697, note:'', radius:2},
-  {day:'Jue 3 · Laruns → Isaba', name:'Jaca', type:'city', lat:42.5709, lon:-0.5498, note:'Repostar aquí', radius:3},
+  {day:'Jue 3 · Laruns → Isaba', name:'Jaca', type:'fuel', lat:42.5709, lon:-0.5498, note:'Repostar aquí', radius:3},
   {day:'Jue 3 · Laruns → Isaba', name:'Hecho', type:'city', lat:42.7280, lon:-0.7460, note:'', radius:2},
   {day:'Jue 3 · Laruns → Isaba', name:'Ansó', type:'city', lat:42.7570, lon:-0.7860, note:'', radius:2},
   {day:'Jue 3 · Laruns → Isaba', name:'Roncal', type:'city', lat:42.7896, lon:-0.9502, note:'', radius:2},
@@ -368,7 +417,7 @@ const DEFAULT_ROUTES = [
   {id:'prueba-campllong', name:'Prueba Campllong', waypoints:CAMPLLONG_WAYPOINTS},
 ];
 
-const TYPE_LABEL = {stop:'Pernocta', city:'Punto', pass:'Puerto', food:'Comida'};
+const TYPE_LABEL = {stop:'Pernocta', city:'Punto', pass:'Puerto', food:'Comida', fuel:'Gasolina'};
 
 /* ---------- Almacén de rutas (localStorage) ---------- */
 const STORE_KEY = 'motoroute_store_v1';
@@ -415,6 +464,13 @@ let manualDriving = false;
 let radarPoints = [];
 let radarMarkers = [];
 let radarAnnounced = new Set();
+let odoSinceFuel = 0;
+let lastOdoPos = null;
+let trackRecording = false;
+let trackPoints = [];
+let maxspeedWays = [];
+let maxspeedFetchedAt = null;
+let speedWarnedRecently = false;
 
 /* ---------- Geometría ---------- */
 function toRad(d){return d*Math.PI/180;}
@@ -551,6 +607,7 @@ function renderTimeline(){
         <div class="name">${wp.name} <span class="badge ${wp.type}">${TYPE_LABEL[wp.type]||'Punto'}</span></div>
         <div class="note">${wp.note || ''}</div>
         ${wp.photo ? `<img class="wp-photo" src="${wp.photo}" alt="${wp.name}" loading="lazy"><div class="wp-photo-credit">${wp.photoCredit||'Wikimedia Commons'}</div>` : ''}
+        ${wp.type === 'pass' ? `<div class="weather-chip" id="wx-${i}">🌤️ Cargando tiempo…</div>` : ''}
       </div>
       <div class="dist">${distTxt}</div>
     `;
@@ -564,6 +621,7 @@ function renderTimeline(){
     });
     dayList.appendChild(li);
   });
+  applyWeatherChips();
 }
 
 /* ---------- Iconos SVG de maniobra ---------- */
@@ -796,6 +854,7 @@ function initMap(){
   document.getElementById('navBanner').style.display = 'flex';
   document.getElementById('offlineCard').style.display = 'block';
   document.getElementById('elevCard').style.display = 'block';
+  document.getElementById('trackCard').style.display = 'block';
   sizeRotatableMap();
   map = L.map('map', {zoomControl:false, attributionControl:true});
   L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -907,6 +966,139 @@ function checkRadarAlerts(){
   }
 }
 
+/* ---------- Aviso de repostaje ---------- */
+function resetFuelTracking(){
+  odoSinceFuel = 0;
+  lastOdoPos = null;
+  document.getElementById('fuelAlert').style.display = 'none';
+}
+function updateFuelTracking(lat, lon){
+  if(lastOdoPos){
+    odoSinceFuel += haversine(lastOdoPos.lat, lastOdoPos.lon, lat, lon) * 1000;
+  }
+  lastOdoPos = {lat, lon};
+  ROUTE.forEach(wp => {
+    if(wp.type === 'fuel' && haversine(lat, lon, wp.lat, wp.lon) < 0.3) odoSinceFuel = 0;
+  });
+  const FUEL_WARN_M = 180000;
+  const el = document.getElementById('fuelAlert');
+  if(odoSinceFuel > FUEL_WARN_M){
+    const next = ROUTE.slice(currentIdx).find(wp => wp.type === 'fuel');
+    document.getElementById('fuelText').textContent =
+      `⛽ Llevas ${Math.round(odoSinceFuel/1000)} km sin repostar` + (next ? ` · próxima gasolinera: ${next.name}` : '');
+    el.style.display = 'flex';
+  } else {
+    el.style.display = 'none';
+  }
+}
+
+/* ---------- Aviso de exceso de velocidad (límites de OpenStreetMap) ---------- */
+function parseMaxspeedTag(v){
+  if(!v) return null;
+  const m = String(v).match(/\d+/);
+  return m ? parseInt(m[0],10) : null;
+}
+async function maybeLoadMaxspeed(){
+  if(!lastPos) return;
+  if(maxspeedFetchedAt && haversine(maxspeedFetchedAt.lat, maxspeedFetchedAt.lon, lastPos.lat, lastPos.lon) < 2) return;
+  maxspeedFetchedAt = {lat:lastPos.lat, lon:lastPos.lon};
+  const d = 0.03;
+  const q = `[out:json][timeout:15];way["highway"]["maxspeed"](${lastPos.lat-d},${lastPos.lon-d},${lastPos.lat+d},${lastPos.lon+d});out geom;`;
+  try{
+    const res = await fetch('https://overpass-api.de/api/interpreter', {method:'POST', body:'data=' + encodeURIComponent(q)});
+    const data = await res.json();
+    maxspeedWays = (data.elements||[]).map(w => ({
+      coords: (w.geometry||[]).map(g => [g.lat, g.lon]),
+      maxspeed: parseMaxspeedTag(w.tags && w.tags.maxspeed)
+    })).filter(w => w.maxspeed && w.coords.length > 1);
+  }catch(e){ /* se mantienen los datos anteriores si falla */ }
+}
+function currentSpeedLimit(){
+  if(!lastPos || !maxspeedWays.length) return null;
+  let best = null, bestDist = Infinity;
+  const [px,py] = toXY(lastPos.lat, lastPos.lon, lastPos.lat);
+  maxspeedWays.forEach(w => {
+    for(let i=0;i<w.coords.length-1;i++){
+      const [lat1,lon1] = w.coords[i], [lat2,lon2] = w.coords[i+1];
+      const [x1,y1] = toXY(lat1,lon1,lastPos.lat), [x2,y2] = toXY(lat2,lon2,lastPos.lat);
+      const dx=x2-x1, dy=y2-y1;
+      const len2 = dx*dx+dy*dy;
+      let t = len2>0 ? ((px-x1)*dx+(py-y1)*dy)/len2 : 0;
+      t = Math.max(0, Math.min(1, t));
+      const dist = Math.hypot(px-(x1+t*dx), py-(y1+t*dy));
+      if(dist < bestDist){ bestDist = dist; best = w.maxspeed; }
+    }
+  });
+  return bestDist < 35 ? best : null;
+}
+function checkSpeedWarning(pos){
+  const el = document.getElementById('speedAlert');
+  const limit = currentSpeedLimit();
+  const spd = pos.coords.speed;
+  if(limit === null || spd === null || spd === undefined || isNaN(spd)){
+    el.style.display = 'none';
+    return;
+  }
+  const kmh = Math.round(spd * 3.6);
+  if(kmh - limit > 8){
+    el.style.display = 'flex';
+    document.getElementById('speedNow').textContent = kmh + ' km/h';
+    document.getElementById('speedLimitTxt').textContent = 'Límite ' + limit + ' km/h';
+    if(!speedWarnedRecently && kmh - limit > 15){
+      speedWarnedRecently = true;
+      speak('Exceso de velocidad');
+      setTimeout(() => { speedWarnedRecently = false; }, 25000);
+    }
+  } else {
+    el.style.display = 'none';
+  }
+}
+
+/* ---------- Grabar trayecto real ---------- */
+function trackKey(){ return 'track_' + store.activeId; }
+function loadTrackState(){
+  try{
+    const raw = localStorage.getItem(trackKey());
+    trackPoints = raw ? JSON.parse(raw) : [];
+  }catch(e){ trackPoints = []; }
+  trackRecording = false;
+  updateTrackUI();
+}
+function saveTrackState(){
+  try{ localStorage.setItem(trackKey(), JSON.stringify(trackPoints)); }catch(e){}
+}
+function updateTrackUI(){
+  const info = document.getElementById('trackInfo');
+  const actions = document.getElementById('trackActions');
+  const btn = document.getElementById('btnTrackToggle');
+  if(!info) return;
+  if(trackRecording) info.textContent = `🔴 Grabando… ${trackPoints.length} puntos`;
+  else if(trackPoints.length) info.textContent = `⏸️ ${trackPoints.length} puntos guardados`;
+  else info.textContent = 'Trayecto no grabado';
+  actions.style.display = trackPoints.length ? 'flex' : 'none';
+  btn.textContent = trackRecording ? '⏸️ Detener' : '🔴 Grabar trayecto';
+}
+function maybeRecordTrackPoint(lat, lon){
+  if(!trackRecording) return;
+  const last = trackPoints[trackPoints.length-1];
+  if(last && haversine(last.lat, last.lon, lat, lon) * 1000 < 20) return;
+  trackPoints.push({lat, lon, t: Date.now()});
+  if(trackPoints.length % 10 === 0) saveTrackState();
+  updateTrackUI();
+}
+function trackToGpx(){
+  const pts = trackPoints.map(p => `      <trkpt lat="${p.lat}" lon="${p.lon}"><time>${new Date(p.t).toISOString()}</time></trkpt>`).join('\n');
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="Rutas Moto" xmlns="http://www.topografix.com/GPX/1/1">
+  <trk>
+    <name>${escapeXml(activeRouteObj().name)}</name>
+    <trkseg>
+${pts}
+    </trkseg>
+  </trk>
+</gpx>`;
+}
+
 function updateMapMarkers(){
   if(!map) return;
   wpMarkers.forEach((m, i) => {
@@ -965,6 +1157,9 @@ function switchRoute(id){
   updateNavBanner();
   if(lastPos) maybeRecomputeRoute();
   renderElevationProfile();
+  loadPassWeather();
+  resetFuelTracking();
+  loadTrackState();
   closeRoutesSheet();
 }
 
@@ -976,6 +1171,8 @@ function renderRoutesList(){
         <div class="rr-name">${r.name}</div>
         <div class="rr-count">${r.waypoints.length} destinos</div>
       </div>
+      <button class="rr-btn" data-action="export" title="Exportar (backup)">📤</button>
+      <button class="rr-btn" data-action="exportgpx" title="Exportar GPX (para GPS/otras apps)">🗺️</button>
       <button class="rr-btn" data-action="edit" title="Editar">✏️</button>
       <button class="rr-btn danger" data-action="delete" title="Eliminar">✕</button>
     </div>
@@ -983,6 +1180,8 @@ function renderRoutesList(){
   el.querySelectorAll('.route-row').forEach(row => {
     const id = row.dataset.id;
     row.querySelector('[data-action="switch"]').addEventListener('click', () => switchRoute(id));
+    row.querySelector('[data-action="export"]').addEventListener('click', () => exportRoute(id));
+    row.querySelector('[data-action="exportgpx"]').addEventListener('click', () => exportRouteGpx(id));
     row.querySelector('[data-action="edit"]').addEventListener('click', () => openEditor(id));
     row.querySelector('[data-action="delete"]').addEventListener('click', () => deleteRoute(id));
   });
@@ -1071,6 +1270,87 @@ async function runSearch(q){
     resEl.innerHTML = '<div class="route-status">Sin conexión para buscar</div>';
   }
 }
+
+/* ---------- Exportar / importar rutas ---------- */
+function downloadFile(filename, content, mime){
+  const blob = new Blob([content], {type:mime});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+function exportRoute(id){
+  const r = store.routes.find(x => x.id === id);
+  if(!r) return;
+  const safeName = r.name.replace(/[^\w\-]+/g, '_');
+  downloadFile(safeName + '.json', JSON.stringify({name:r.name, waypoints:r.waypoints}, null, 2), 'application/json');
+}
+function waypointsToGpx(name, waypoints){
+  const pts = waypoints.map(w => `    <rtept lat="${w.lat}" lon="${w.lon}"><name>${escapeXml(w.name)}</name></rtept>`).join('\n');
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="Rutas Moto" xmlns="http://www.topografix.com/GPX/1/1">
+  <rte>
+    <name>${escapeXml(name)}</name>
+${pts}
+  </rte>
+</gpx>`;
+}
+function exportRouteGpx(id){
+  const r = store.routes.find(x => x.id === id);
+  if(!r) return;
+  const safeName = r.name.replace(/[^\w\-]+/g, '_');
+  downloadFile(safeName + '.gpx', waypointsToGpx(r.name, r.waypoints), 'application/gpx+xml');
+}
+
+function parseGpxWaypoints(xmlText){
+  const doc = new DOMParser().parseFromString(xmlText, 'text/xml');
+  const nodes = [...doc.querySelectorAll('rtept, wpt, trkpt')];
+  return nodes.map(n => {
+    const nameEl = n.querySelector('name');
+    return {
+      name: nameEl ? nameEl.textContent : 'Punto',
+      type: 'city',
+      lat: parseFloat(n.getAttribute('lat')),
+      lon: parseFloat(n.getAttribute('lon')),
+      note: '', radius: 0.5, day: ''
+    };
+  }).filter(w => !isNaN(w.lat) && !isNaN(w.lon));
+}
+
+document.getElementById('btnImportRoute').addEventListener('click', () => document.getElementById('importFile').click());
+document.getElementById('importFile').addEventListener('change', e => {
+  const file = e.target.files[0];
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try{
+      let name, waypoints;
+      if(file.name.toLowerCase().endsWith('.gpx')){
+        waypoints = parseGpxWaypoints(reader.result);
+        name = file.name.replace(/\.gpx$/i, '');
+      } else {
+        const parsed = JSON.parse(reader.result);
+        waypoints = parsed.waypoints;
+        name = parsed.name || file.name.replace(/\.json$/i, '');
+      }
+      if(!Array.isArray(waypoints) || !waypoints.length) throw new Error('sin destinos');
+      const id = 'route-' + Date.now() + '-' + Math.floor(Math.random()*1000);
+      store.routes.push({id, name, waypoints});
+      store.progress[id] = 0;
+      saveStore();
+      switchRoute(id);
+      showToast('✓ Ruta importada: ' + name);
+    }catch(err){
+      showToast('No se pudo importar el archivo');
+    }
+    e.target.value = '';
+  };
+  reader.readAsText(file);
+});
 
 /* ---------- Descarga de mapas offline ---------- */
 function tileXY(lat, lon, z){
@@ -1214,6 +1494,40 @@ function elevChartHtml(g){
     </div>`;
 }
 
+/* ---------- Tiempo en los puertos ---------- */
+const WX_ICON = {0:'☀️',1:'🌤️',2:'⛅',3:'☁️',45:'🌫️',48:'🌫️',51:'🌦️',53:'🌦️',55:'🌦️',
+  61:'🌧️',63:'🌧️',65:'🌧️',66:'🌧️',67:'🌧️',71:'🌨️',73:'🌨️',75:'🌨️',77:'🌨️',
+  80:'🌦️',81:'🌧️',82:'⛈️',85:'🌨️',86:'🌨️',95:'⛈️',96:'⛈️',99:'⛈️'};
+let passWeather = {};
+async function loadPassWeather(){
+  passWeather = {};
+  const passes = ROUTE.map((w,i) => ({w,i})).filter(p => p.w.type === 'pass');
+  if(!passes.length) return;
+  try{
+    const lats = passes.map(p=>p.w.lat).join(',');
+    const lons = passes.map(p=>p.w.lon).join(',');
+    const res = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lats}&longitude=${lons}&current=temperature_2m,weather_code,wind_speed_10m`);
+    const data = await res.json();
+    const list = Array.isArray(data) ? data : [data];
+    passes.forEach((p, k) => {
+      const d = list[k];
+      if(d && d.current){
+        passWeather[p.i] = {temp: Math.round(d.current.temperature_2m), code: d.current.weather_code, wind: Math.round(d.current.wind_speed_10m)};
+      }
+    });
+  }catch(e){ /* sin conexión: se deja vacío, applyWeatherChips no pinta nada */ }
+  applyWeatherChips();
+}
+function applyWeatherChips(){
+  Object.keys(passWeather).forEach(i => {
+    const el = document.getElementById('wx-' + i);
+    if(!el) return;
+    const w = passWeather[i];
+    const icon = WX_ICON[w.code] || '🌡️';
+    el.textContent = `${icon} ${w.temp}°C · viento ${w.wind} km/h`;
+  });
+}
+
 /* ---------- Modo conducción ---------- */
 function applyDrivingClass(){
   document.body.classList.toggle('driving', autoDriving || manualDriving);
@@ -1244,6 +1558,10 @@ function startWatch(){
     updateMePosition(lastPos.lat, lastPos.lon);
     applyMapRotation();
     checkRadarAlerts();
+    updateFuelTracking(lastPos.lat, lastPos.lon);
+    checkSpeedWarning(pos);
+    maybeLoadMaxspeed();
+    maybeRecordTrackPoint(lastPos.lat, lastPos.lon);
     render();
     updateNavBanner();
     maybeRecomputeRoute();
@@ -1301,6 +1619,22 @@ document.getElementById('btnRecalc').addEventListener('click', () => {
   routedIdx = -1;
   maybeRecomputeRoute(true);
 });
+document.getElementById('btnTrackToggle').addEventListener('click', () => {
+  trackRecording = !trackRecording;
+  if(trackRecording) speak('Grabación de trayecto iniciada');
+  saveTrackState();
+  updateTrackUI();
+});
+document.getElementById('btnTrackExport').addEventListener('click', () => {
+  if(!trackPoints.length) return;
+  downloadFile('trayecto_' + activeRouteObj().name.replace(/[^\w\-]+/g,'_') + '.gpx', trackToGpx(), 'application/gpx+xml');
+});
+document.getElementById('btnTrackClear').addEventListener('click', () => {
+  if(!confirm('¿Borrar el trayecto grabado?')) return;
+  trackPoints = [];
+  saveTrackState();
+  updateTrackUI();
+});
 document.getElementById('btnSkip').addEventListener('click', () => {
   if(currentIdx < ROUTE.length-1){
     currentIdx++;
@@ -1352,6 +1686,8 @@ document.getElementById('btnSaveRoute').addEventListener('click', () => {
 window.addEventListener('resize', () => { if(map) sizeRotatableMap(); });
 
 render();
+loadPassWeather();
+loadTrackState();
 
 if('serviceWorker' in navigator){
   window.addEventListener('load', () => {
