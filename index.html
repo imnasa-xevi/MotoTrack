@@ -77,6 +77,13 @@
   .rotate-btn{position:absolute; left:20px; bottom:20px; z-index:1000; width:42px; height:42px; border-radius:50%; background:var(--bg2); color:var(--muted); border:1px solid var(--border); font-size:1.1rem; display:flex; align-items:center; justify-content:center; box-shadow:0 2px 8px rgba(0,0,0,.4);}
   .rotate-btn.on{background:var(--pass); color:#04121f; border:none;}
   .overview-btn{position:absolute; top:10px; right:10px; z-index:1000; width:42px; height:42px; border-radius:50%; background:var(--bg2); color:var(--text); border:1px solid var(--border); font-size:1.1rem; display:flex; align-items:center; justify-content:center; box-shadow:0 2px 8px rgba(0,0,0,.4);}
+  .fullscreen-btn{position:absolute; top:10px; left:10px; z-index:1600; width:42px; height:42px; border-radius:50%; background:var(--bg2); color:var(--text); border:1px solid var(--border); font-size:1.1rem; display:flex; align-items:center; justify-content:center; box-shadow:0 2px 8px rgba(0,0,0,.4);}
+
+  #mapCard.fullscreen{position:fixed; inset:0; z-index:3000; margin:0; padding:0; border-radius:0; border:none;}
+  #mapCard.fullscreen #mapViewport{height:100%; border-radius:0;}
+  #navCol.overlay-nav{position:absolute; top:60px; left:10px; right:10px; z-index:1500; display:flex; flex-direction:column; pointer-events:none;}
+  #navCol.overlay-nav > *{pointer-events:auto;}
+  body.fullscreen-nav-active{overflow:hidden;}
   .me-dot{width:16px;height:16px;border-radius:50%; background:#3ecf8e; border:3px solid #fff; box-shadow:0 0 0 4px rgba(62,207,142,.3);}
   .wake-note{font-size:.68rem; color:var(--muted); text-align:center; margin-top:10px; line-height:1.4;}
 
@@ -274,6 +281,7 @@
 
     <div id="mapCard" class="map-card" style="display:none;">
       <div id="mapViewport"><div id="map"></div></div>
+      <button class="fullscreen-btn" id="btnFullscreenMap" title="Pantalla completa">⛶</button>
       <button class="overview-btn" id="btnOverview" title="Ver toda la ruta">🗺️</button>
       <button class="rotate-btn" id="btnRotate" title="Girar mapa según la marcha">🧭</button>
       <button class="follow-btn" id="btnFollow" title="Seguir mi posición">🎯</button>
@@ -1301,6 +1309,37 @@ function showFullRoute(){
   map.fitBounds(line.getBounds(), {padding:[28,28]});
 }
 
+/* Modo pantalla completa: el mapa ocupa toda la pantalla y las indicaciones
+   de navegación (giro, radar, velocidad, gasolina) se superponen encima,
+   reubicando de verdad los mismos elementos (no una copia) para que sigan
+   actualizándose con normalidad. */
+let fullscreenNav = false;
+function toggleFullscreenNav(){
+  if(!map) return;
+  const mapCard = document.getElementById('mapCard');
+  const navCol = document.getElementById('navCol');
+  const navMapWrap = document.getElementById('navMapWrap');
+  const btn = document.getElementById('btnFullscreenMap');
+  fullscreenNav = !fullscreenNav;
+  if(fullscreenNav){
+    mapCard.classList.add('fullscreen');
+    navCol.classList.add('overlay-nav');
+    mapCard.insertBefore(navCol, mapCard.firstChild);
+    document.body.classList.add('fullscreen-nav-active');
+    btn.textContent = '✕';
+    btn.title = 'Cerrar pantalla completa';
+  } else {
+    navCol.classList.remove('overlay-nav');
+    navMapWrap.insertBefore(navCol, navMapWrap.firstChild);
+    mapCard.classList.remove('fullscreen');
+    document.body.classList.remove('fullscreen-nav-active');
+    btn.textContent = '⛶';
+    btn.title = 'Pantalla completa';
+  }
+  sizeRotatableMap();
+  setTimeout(() => { if(map) map.invalidateSize(); }, 60);
+}
+
 function setRotateMode(on){
   mapRotateMode = on;
   const btn = document.getElementById('btnRotate');
@@ -1802,6 +1841,7 @@ document.getElementById('btnPause').addEventListener('click', () => {
 });
 document.getElementById('btnFollow').addEventListener('click', () => setFollow(!followMode));
 document.getElementById('btnOverview').addEventListener('click', showFullRoute);
+document.getElementById('btnFullscreenMap').addEventListener('click', toggleFullscreenNav);
 document.getElementById('btnRotate').addEventListener('click', () => setRotateMode(!mapRotateMode));
 document.getElementById('btnVoice').addEventListener('click', () => {
   voiceEnabled = !voiceEnabled;
