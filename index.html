@@ -456,6 +456,9 @@ let odoSinceFuel = 0;
 let lastOdoPos = null;
 let fuelStations = [];
 let fuelRangeKm = parseFloat(localStorage.getItem('fuelRangeKm')) || 200;
+let stoppedAtFuelKey = null;
+let stoppedAtFuelSince = null;
+let lastFixForSpeed = null;
 let trackRecording = false;
 let trackPoints = [];
 let maxspeedWays = [];
@@ -985,6 +988,8 @@ function checkRadarAlerts(){
 function resetFuelTracking(){
   odoSinceFuel = 0;
   lastOdoPos = null;
+  stoppedAtFuelKey = null;
+  stoppedAtFuelSince = null;
   document.getElementById('fuelAlert').style.display = 'none';
 }
 async function loadFuelStations(){
@@ -1006,19 +1011,70 @@ async function loadFuelStations(){
     try{ localStorage.setItem(cacheKey, JSON.stringify(fuelStations)); }catch(e){}
   }catch(e){ fuelStations = []; }
 }
-function updateFuelTracking(lat, lon){
+function nearestFuelPoint(lat, lon){
+  let best = null, bestDist = Infinity;
+  ROUTE.forEach(wp => {
+    if(wp.type !== 'fuel') return;
+    const d = haversine(lat, lon, wp.lat, wp.lon) * 1000;
+    if(d < bestDist){ bestDist = d; best = {lat:wp.lat, lon:wp.lon}; }
+  });
+  fuelStations.forEach(f => {
+    const d = haversine(lat, lon, f.lat, f.lon) * 1000;
+    if(d < bestDist){ bestDist = d; best = f; }
+  });
+  return bestDist < 150 ? best : null;
+}
+
+// Solo se considera repostaje real si llevas parado (no solo cerca) más de 2 minutos
+// junto a una gasolinera y ya llevas más de 150 km, para no reiniciar el contador por
+// una parada a tomar café o a esperar a un compañero.
+const FUEL_STOP_MS = 2 * 60 * 1000;
+const FUEL_MIN_KM_FOR_RESET = 150000;
+const FUEL_STOP_SPEED_MS = 1.2;
+function checkFuelStop(lat, lon, speedMs){
+  const near = nearestFuelPoint(lat, lon);
+  const isStopped = speedMs !== null && speedMs < FUEL_STOP_SPEED_MS;
+  if(near && isStopped){
+    const key = near.lat.toFixed(4) + ',' + near.lon.toFixed(4);
+    if(stoppedAtFuelKey !== key){
+      stoppedAtFuelKey = key;
+      stoppedAtFuelSince = Date.now();
+    } else if(Date.now() - stoppedAtFuelSince >= FUEL_STOP_MS){
+      if(odoSinceFuel > FUEL_MIN_KM_FOR_RESET){
+        odoSinceFuel = 0;
+        showToast('⛽ Repostaje detectado, contador reiniciado');
+        speak('Repostaje detectado, contador reiniciado');
+      }
+      stoppedAtFuelKey = null;
+      stoppedAtFuelSince = null;
+    }
+  } else {
+    stoppedAtFuelKey = null;
+    stoppedAtFuelSince = null;
+  }
+}
+
+function estimateSpeedMS(pos){
+  let speed = pos.coords.speed;
+  if(speed === null || speed === undefined || isNaN(speed)){
+    speed = null;
+    if(lastFixForSpeed){
+      const dt = (Date.now() - lastFixForSpeed.t) / 1000;
+      if(dt > 0.5){
+        speed = haversine(lastFixForSpeed.lat, lastFixForSpeed.lon, pos.coords.latitude, pos.coords.longitude) * 1000 / dt;
+      }
+    }
+  }
+  lastFixForSpeed = {lat:pos.coords.latitude, lon:pos.coords.longitude, t:Date.now()};
+  return speed;
+}
+
+function updateFuelTracking(lat, lon, speedMs){
   if(lastOdoPos){
     odoSinceFuel += haversine(lastOdoPos.lat, lastOdoPos.lon, lat, lon) * 1000;
   }
   lastOdoPos = {lat, lon};
-  let refueled = false;
-  ROUTE.forEach(wp => {
-    if(wp.type === 'fuel' && haversine(lat, lon, wp.lat, wp.lon) < 0.3) refueled = true;
-  });
-  fuelStations.forEach(f => {
-    if(haversine(lat, lon, f.lat, f.lon) < 0.15) refueled = true;
-  });
-  if(refueled) odoSinceFuel = 0;
+  checkFuelStop(lat, lon, speedMs);
 
   const warnAtM = fuelRangeKm * 0.85 * 1000; // margen de seguridad: avisa al 85% de la autonomía indicada
   const el = document.getElementById('fuelAlert');
@@ -1599,7 +1655,7 @@ function startWatch(){
     updateMePosition(lastPos.lat, lastPos.lon);
     applyMapRotation();
     checkRadarAlerts();
-    updateFuelTracking(lastPos.lat, lastPos.lon);
+    updateFuelTracking(lastPos.lat, lastPos.lon, estimateSpeedMS(pos));
     checkSpeedWarning(pos);
     maybeLoadMaxspeed();
     maybeRecordTrackPoint(lastPos.lat, lastPos.lon);
