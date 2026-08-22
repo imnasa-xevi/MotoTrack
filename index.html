@@ -73,6 +73,7 @@
   .follow-btn.off{background:var(--bg2); color:var(--muted); border:1px solid var(--border);}
   .rotate-btn{position:absolute; left:20px; bottom:20px; z-index:1000; width:42px; height:42px; border-radius:50%; background:var(--bg2); color:var(--muted); border:1px solid var(--border); font-size:1.1rem; display:flex; align-items:center; justify-content:center; box-shadow:0 2px 8px rgba(0,0,0,.4);}
   .rotate-btn.on{background:var(--pass); color:#04121f; border:none;}
+  .overview-btn{position:absolute; top:10px; right:10px; z-index:1000; width:42px; height:42px; border-radius:50%; background:var(--bg2); color:var(--text); border:1px solid var(--border); font-size:1.1rem; display:flex; align-items:center; justify-content:center; box-shadow:0 2px 8px rgba(0,0,0,.4);}
   .me-dot{width:16px;height:16px;border-radius:50%; background:#3ecf8e; border:3px solid #fff; box-shadow:0 0 0 4px rgba(62,207,142,.3);}
   .wake-note{font-size:.68rem; color:var(--muted); text-align:center; margin-top:10px; line-height:1.4;}
 
@@ -255,6 +256,7 @@
 
   <div id="mapCard" class="map-card" style="display:none;">
     <div id="mapViewport"><div id="map"></div></div>
+    <button class="overview-btn" id="btnOverview" title="Ver toda la ruta">🗺️</button>
     <button class="rotate-btn" id="btnRotate" title="Girar mapa según la marcha">🧭</button>
     <button class="follow-btn" id="btnFollow" title="Seguir mi posición">🎯</button>
   </div>
@@ -1226,6 +1228,13 @@ function setFollow(on){
   if(!on && mapRotateMode) setRotateMode(false);
 }
 
+function showFullRoute(){
+  if(!map) return;
+  setFollow(false);
+  const line = L.polyline(ROUTE.map(w => [w.lat, w.lon]));
+  map.fitBounds(line.getBounds(), {padding:[28,28]});
+}
+
 function setRotateMode(on){
   mapRotateMode = on;
   const btn = document.getElementById('btnRotate');
@@ -1698,6 +1707,7 @@ document.getElementById('btnEnable').addEventListener('click', () => {
   speak('Navegación iniciada');
 });
 document.getElementById('btnFollow').addEventListener('click', () => setFollow(!followMode));
+document.getElementById('btnOverview').addEventListener('click', showFullRoute);
 document.getElementById('btnRotate').addEventListener('click', () => setRotateMode(!mapRotateMode));
 document.getElementById('btnVoice').addEventListener('click', () => {
   voiceEnabled = !voiceEnabled;
