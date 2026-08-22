@@ -440,6 +440,7 @@ let lastPos = null;
 let watchId = null;
 let wakeLock = null;
 let map = null, meMarker = null, wpMarkers = [], routeLine = null, baseLineSegments = [];
+let fullRouteGeoms = [];
 let followMode = true;
 let routeModel = null;
 let routedIdx = -1;
@@ -553,12 +554,22 @@ function renderNextCard(){
   document.getElementById('nextNote').textContent = wp.note || '';
 
   document.getElementById('btnMapsApple').onclick = () => {
-    window.location.href = `https://maps.apple.com/?daddr=${wp.lat},${wp.lon}&dirflg=d`;
+    const stops = ROUTE.slice(currentIdx);
+    const daddr = stops.map(s => `${s.lat},${s.lon}`).join('+to:');
+    window.location.href = `https://maps.apple.com/?daddr=${daddr}&dirflg=d`;
   };
   document.getElementById('btnMapsGoogle').onclick = () => {
-    window.location.href = `https://www.google.com/maps/dir/?api=1&destination=${wp.lat},${wp.lon}&travelmode=driving`;
+    const stops = ROUTE.slice(currentIdx);
+    const dest = stops[stops.length-1];
+    let url = `https://www.google.com/maps/dir/?api=1&destination=${dest.lat},${dest.lon}&travelmode=driving`;
+    if(stops.length > 1){
+      const waypoints = stops.slice(0, -1).map(s => `${s.lat},${s.lon}`).join('|');
+      url += `&waypoints=${encodeURIComponent(waypoints)}`;
+    }
+    window.location.href = url;
   };
   document.getElementById('btnMapsWaze').onclick = () => {
+    // Waze no admite varias paradas por enlace: solo puede llevarte al siguiente destino
     window.location.href = `https://waze.com/ul?ll=${wp.lat},${wp.lon}&navigate=yes`;
   };
 
@@ -890,10 +901,13 @@ function rebuildMapForRoute(){
   updateMapMarkers();
   loadRadars();
   loadFuelStations();
+  loadFullRouteGeometry();
 }
 
 /* Dibuja toda la ruta en el mapa, coloreando cada tramo según esté ya
-   recorrido (verde), sea el tramo actual (naranja) o quede por delante (azul). */
+   recorrido (verde), sea el tramo actual (naranja) o quede por delante (azul).
+   Usa la geometría real por carretera de fullRouteGeoms cuando ya está
+   cargada; mientras tanto (o si un tramo falla) recurre a la línea recta. */
 function redrawBaseSegments(){
   if(!map) return;
   baseLineSegments.forEach(s => map.removeLayer(s));
@@ -902,10 +916,43 @@ function redrawBaseSegments(){
     let color = '#5aa9ff', weight = 4, opacity = .7;
     if(i+1 < currentIdx){ color = '#3ecf8e'; opacity = .55; }
     else if(i+1 === currentIdx){ color = '#ff7a45'; weight = 6; opacity = .9; }
-    const seg = L.polyline([[ROUTE[i].lat, ROUTE[i].lon], [ROUTE[i+1].lat, ROUTE[i+1].lon]], {color, weight, opacity});
+    const coords = fullRouteGeoms[i] || [[ROUTE[i].lat, ROUTE[i].lon], [ROUTE[i+1].lat, ROUTE[i+1].lon]];
+    const seg = L.polyline(coords, {color, weight, opacity});
     seg.addTo(map);
     baseLineSegments.push(seg);
   }
+  // Los tramos se añaden después que los marcadores de destino y quedarían por
+  // encima tapándolos; se traen los marcadores al frente para que se vean todos.
+  wpMarkers.forEach(m => m.bringToFront());
+}
+
+async function loadFullRouteGeometry(){
+  loadFullRouteGeometry.activeIdAtStart = store.activeId;
+  fullRouteGeoms = new Array(Math.max(0, ROUTE.length - 1)).fill(null);
+  const cacheKey = 'routegeo_' + store.activeId;
+  try{
+    const cached = localStorage.getItem(cacheKey);
+    if(cached){
+      const parsed = JSON.parse(cached);
+      if(Array.isArray(parsed) && parsed.length === ROUTE.length - 1){
+        fullRouteGeoms = parsed;
+        redrawBaseSegments();
+        return;
+      }
+    }
+  }catch(e){}
+  for(let i=0;i<ROUTE.length-1;i++){
+    if(store.activeId !== loadFullRouteGeometry.activeIdAtStart) return; // se cambió de ruta a mitad
+    try{
+      const r = await fetchOsrmRoute(ROUTE[i], ROUTE[i+1]);
+      fullRouteGeoms[i] = r.geometry.coordinates.map(c => [c[1], c[0]]);
+    }catch(e){
+      fullRouteGeoms[i] = null;
+    }
+    redrawBaseSegments();
+    await sleep(80);
+  }
+  try{ localStorage.setItem(cacheKey, JSON.stringify(fullRouteGeoms)); }catch(e){}
 }
 
 /* ---------- Radares fijos (OpenStreetMap) ---------- */
@@ -1485,16 +1532,22 @@ async function downloadOfflineMaps(){
 
   for(let i=0; i<ROUTE.length-1 && !dlCancelled; i++){
     statusEl.textContent = `Calculando tramo ${i+1}/${ROUTE.length-1}…`;
-    try{
-      const r = await fetchOsrmRoute(ROUTE[i], ROUTE[i+1]);
-      const coords = r.geometry.coordinates;
-      for(let j=0;j<coords.length;j+=3) addPoint(coords[j][1], coords[j][0]);
-      addPoint(coords[coords.length-1][1], coords[coords.length-1][0]);
-    }catch(e){
-      addPoint(ROUTE[i].lat, ROUTE[i].lon);
-      addPoint(ROUTE[i+1].lat, ROUTE[i+1].lon);
+    if(fullRouteGeoms[i]){
+      // ya calculado para dibujar la ruta en el mapa: se reutiliza sin volver a pedirlo
+      fullRouteGeoms[i].forEach((c, j) => { if(j % 3 === 0) addPoint(c[0], c[1]); });
+    } else {
+      try{
+        const r = await fetchOsrmRoute(ROUTE[i], ROUTE[i+1]);
+        const coords = r.geometry.coordinates;
+        for(let j=0;j<coords.length;j+=3) addPoint(coords[j][1], coords[j][0]);
+        addPoint(coords[coords.length-1][1], coords[coords.length-1][0]);
+        fullRouteGeoms[i] = coords.map(c => [c[1], c[0]]);
+      }catch(e){
+        addPoint(ROUTE[i].lat, ROUTE[i].lon);
+        addPoint(ROUTE[i+1].lat, ROUTE[i+1].lon);
+      }
+      await sleep(120);
     }
-    await sleep(120);
   }
 
   const tiles = Array.from(tileSet);
