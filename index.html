@@ -36,6 +36,9 @@
   body{padding-top:env(safe-area-inset-top); padding-bottom:env(safe-area-inset-bottom);}
   #app{max-width:560px;margin:0 auto;padding:0 16px 40px;}
 
+  #navMapWrap{display:flex; flex-direction:column;}
+  #navCol{display:flex; flex-direction:column;}
+
   header{padding:18px 4px 10px; display:flex; align-items:center; justify-content:space-between; gap:10px;}
   header h1{font-size:1.05rem; font-weight:700; margin:0; letter-spacing:.2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
   header .sub{font-size:.78rem; color:var(--muted);}
@@ -199,6 +202,17 @@
   .stop-row .sr-name{flex:1; min-width:0; font-size:.85rem;}
   .stop-row .sr-actions{display:flex; gap:4px; flex:none;}
   .stop-row .sr-actions button{background:var(--bg2); border:1px solid var(--border); color:var(--text); width:26px; height:26px; border-radius:8px; font-size:.75rem;}
+
+  @media (orientation:landscape) and (max-height:520px){
+    #app{max-width:920px;}
+    #navMapWrap{flex-direction:row; align-items:stretch; gap:12px;}
+    #navCol{flex:1 1 300px; min-width:260px; justify-content:center;}
+    #mapCard{flex:1.7 1 380px; margin-top:0;}
+    #mapViewport{height:100%; min-height:280px;}
+    .next-card{display:flex; flex-wrap:wrap; align-items:flex-start; gap:16px;}
+    .next-card .metrics{flex:1 1 260px; margin:0;}
+    .next-card .actions{flex:1 1 260px; margin:0; flex-wrap:wrap;}
+  }
 </style>
 </head>
 <body>
@@ -223,43 +237,47 @@
     <button class="btn" id="btnEnable">Activar ubicación</button>
   </div>
 
-  <div id="speedAlert" class="speed-alert" style="display:none;">
-    <div class="sp-icon">⚠️</div>
-    <div class="sp-body">
-      <div class="sp-now" id="speedNow">—</div>
-      <div class="sp-sub" id="speedLimitTxt">Límite —</div>
+  <div id="navMapWrap">
+    <div id="navCol">
+      <div id="speedAlert" class="speed-alert" style="display:none;">
+        <div class="sp-icon">⚠️</div>
+        <div class="sp-body">
+          <div class="sp-now" id="speedNow">—</div>
+          <div class="sp-sub" id="speedLimitTxt">Límite —</div>
+        </div>
+      </div>
+
+      <div id="radarAlert" class="radar-alert" style="display:none;">
+        <div class="ra-icon">📷</div>
+        <div class="ra-body">
+          <div class="ra-dist" id="radarDist">—</div>
+          <div class="ra-sub" id="radarSpeed">Radar fijo</div>
+        </div>
+      </div>
+
+      <div id="fuelAlert" class="fuel-alert" style="display:none;">
+        <div class="fa-icon">⛽</div>
+        <div class="fa-body" id="fuelText">Llevas un buen tramo sin repostar</div>
+      </div>
+
+      <div id="navBanner" class="nav-banner" style="display:none;">
+        <button class="mode-btn" id="btnDrivingMode" title="Forzar modo conducción">A+</button>
+        <div class="nb-icon" id="nbIcon"></div>
+        <div class="nb-body">
+          <div class="nb-dist" id="nbDist">—</div>
+          <div class="nb-text" id="nbText">Calculando ruta…</div>
+        </div>
+        <button class="voice-btn on" id="btnVoice" title="Voz">🔊</button>
+      </div>
+      <button class="btn small secondary" id="btnRecalc" style="display:none; width:100%; margin-top:8px;">🔄 Recalcular ruta desde aquí</button>
     </div>
-  </div>
 
-  <div id="radarAlert" class="radar-alert" style="display:none;">
-    <div class="ra-icon">📷</div>
-    <div class="ra-body">
-      <div class="ra-dist" id="radarDist">—</div>
-      <div class="ra-sub" id="radarSpeed">Radar fijo</div>
+    <div id="mapCard" class="map-card" style="display:none;">
+      <div id="mapViewport"><div id="map"></div></div>
+      <button class="overview-btn" id="btnOverview" title="Ver toda la ruta">🗺️</button>
+      <button class="rotate-btn" id="btnRotate" title="Girar mapa según la marcha">🧭</button>
+      <button class="follow-btn" id="btnFollow" title="Seguir mi posición">🎯</button>
     </div>
-  </div>
-
-  <div id="fuelAlert" class="fuel-alert" style="display:none;">
-    <div class="fa-icon">⛽</div>
-    <div class="fa-body" id="fuelText">Llevas un buen tramo sin repostar</div>
-  </div>
-
-  <div id="navBanner" class="nav-banner" style="display:none;">
-    <button class="mode-btn" id="btnDrivingMode" title="Forzar modo conducción">A+</button>
-    <div class="nb-icon" id="nbIcon"></div>
-    <div class="nb-body">
-      <div class="nb-dist" id="nbDist">—</div>
-      <div class="nb-text" id="nbText">Calculando ruta…</div>
-    </div>
-    <button class="voice-btn on" id="btnVoice" title="Voz">🔊</button>
-  </div>
-  <button class="btn small secondary" id="btnRecalc" style="display:none; width:100%; margin-top:8px;">🔄 Recalcular ruta desde aquí</button>
-
-  <div id="mapCard" class="map-card" style="display:none;">
-    <div id="mapViewport"><div id="map"></div></div>
-    <button class="overview-btn" id="btnOverview" title="Ver toda la ruta">🗺️</button>
-    <button class="rotate-btn" id="btnRotate" title="Girar mapa según la marcha">🧭</button>
-    <button class="follow-btn" id="btnFollow" title="Seguir mi posición">🎯</button>
   </div>
 
   <div id="offlineCard" class="offline-card" style="display:none;">
