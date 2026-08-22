@@ -29,22 +29,6 @@
     --arrived-b:#0f1f19;
     font-size:16px;
   }
-  @media (prefers-color-scheme: light){
-    :root{
-      --bg:#eef2f5;
-      --bg2:#ffffff;
-      --card:#ffffff;
-      --border:#dbe2e8;
-      --text:#12202b;
-      --muted:#5b6b78;
-      --accent:#e8632a;
-      --accent2:#1a9d63;
-      --pass:#1c6fd6;
-      --danger:#d13a3a;
-      --arrived-a:#e3f5ec;
-      --arrived-b:#f4fbf8;
-    }
-  }
   *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
   html,body{margin:0;padding:0;background:var(--bg);color:var(--text);
     font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",Helvetica,Arial,sans-serif;
@@ -324,6 +308,8 @@
   <footer>
     Los datos de la ruta y los puntos GPS son orientativos.<br>
     Radares fijos según datos abiertos de OpenStreetMap (colaborativos, pueden estar incompletos o desactualizados).<br>
+    ⛽ Autonomía de tu moto: <input type="number" id="fuelRangeInput" min="50" max="600" step="10" style="width:56px; background:var(--bg2); border:1px solid var(--border); color:var(--text); border-radius:6px; padding:2px 4px; text-align:center;"> km
+    (el aviso salta al 85%)<br>
     <button id="btnReset">Reiniciar progreso de esta ruta</button>
   </footer>
 </div>
@@ -449,7 +435,7 @@ if(isNaN(currentIdx) || currentIdx < 0 || currentIdx >= ROUTE.length) currentIdx
 let lastPos = null;
 let watchId = null;
 let wakeLock = null;
-let map = null, meMarker = null, wpMarkers = [], routeLine = null, baseLine = null;
+let map = null, meMarker = null, wpMarkers = [], routeLine = null, baseLineSegments = [];
 let followMode = true;
 let routeModel = null;
 let routedIdx = -1;
@@ -466,6 +452,8 @@ let radarMarkers = [];
 let radarAnnounced = new Set();
 let odoSinceFuel = 0;
 let lastOdoPos = null;
+let fuelStations = [];
+let fuelRangeKm = parseFloat(localStorage.getItem('fuelRangeKm')) || 200;
 let trackRecording = false;
 let trackPoints = [];
 let maxspeedWays = [];
@@ -867,7 +855,8 @@ function initMap(){
 
 function rebuildMapForRoute(){
   if(!map) return;
-  if(baseLine){ map.removeLayer(baseLine); baseLine=null; }
+  baseLineSegments.forEach(s => map.removeLayer(s));
+  baseLineSegments = [];
   wpMarkers.forEach(m => map.removeLayer(m));
   wpMarkers = [];
   if(routeLine){ map.removeLayer(routeLine); routeLine=null; }
@@ -877,15 +866,33 @@ function rebuildMapForRoute(){
   radarPoints = [];
   radarAnnounced.clear();
   document.getElementById('radarAlert').style.display = 'none';
+  fuelStations = [];
 
-  baseLine = L.polyline(ROUTE.map(w => [w.lat, w.lon]), {color:'#5aa9ff', weight:4, opacity:.75}).addTo(map);
-  map.fitBounds(baseLine.getBounds(), {padding:[28,28]});
+  const fitLine = L.polyline(ROUTE.map(w => [w.lat, w.lon]));
+  map.fitBounds(fitLine.getBounds(), {padding:[28,28]});
 
   wpMarkers = ROUTE.map(wp => L.circleMarker([wp.lat, wp.lon], {
     radius:7, weight:2, color:'#fff', fillColor:'#93a5b3', fillOpacity:1
   }).addTo(map).bindPopup(wp.name));
   updateMapMarkers();
   loadRadars();
+  loadFuelStations();
+}
+
+/* Dibuja toda la ruta en el mapa, coloreando cada tramo según esté ya
+   recorrido (verde), sea el tramo actual (naranja) o quede por delante (azul). */
+function redrawBaseSegments(){
+  if(!map) return;
+  baseLineSegments.forEach(s => map.removeLayer(s));
+  baseLineSegments = [];
+  for(let i=0;i<ROUTE.length-1;i++){
+    let color = '#5aa9ff', weight = 4, opacity = .7;
+    if(i+1 < currentIdx){ color = '#3ecf8e'; opacity = .55; }
+    else if(i+1 === currentIdx){ color = '#ff7a45'; weight = 6; opacity = .9; }
+    const seg = L.polyline([[ROUTE[i].lat, ROUTE[i].lon], [ROUTE[i+1].lat, ROUTE[i+1].lon]], {color, weight, opacity});
+    seg.addTo(map);
+    baseLineSegments.push(seg);
+  }
 }
 
 /* ---------- Radares fijos (OpenStreetMap) ---------- */
@@ -972,20 +979,45 @@ function resetFuelTracking(){
   lastOdoPos = null;
   document.getElementById('fuelAlert').style.display = 'none';
 }
+async function loadFuelStations(){
+  fuelStations = [];
+  if(ROUTE.length < 1) return;
+  const cacheKey = 'fuelstations_' + store.activeId;
+  try{
+    const cached = localStorage.getItem(cacheKey);
+    if(cached){ fuelStations = JSON.parse(cached); return; }
+  }catch(e){}
+  const lats = ROUTE.map(w=>w.lat), lons = ROUTE.map(w=>w.lon);
+  const minLat = Math.min(...lats)-0.08, maxLat = Math.max(...lats)+0.08;
+  const minLon = Math.min(...lons)-0.08, maxLon = Math.max(...lons)+0.08;
+  const q = `[out:json][timeout:25];node["amenity"="fuel"](${minLat},${minLon},${maxLat},${maxLon});out body;`;
+  try{
+    const res = await fetch('https://overpass-api.de/api/interpreter', {method:'POST', body:'data=' + encodeURIComponent(q)});
+    const data = await res.json();
+    fuelStations = (data.elements||[]).map(e => ({lat:e.lat, lon:e.lon}));
+    try{ localStorage.setItem(cacheKey, JSON.stringify(fuelStations)); }catch(e){}
+  }catch(e){ fuelStations = []; }
+}
 function updateFuelTracking(lat, lon){
   if(lastOdoPos){
     odoSinceFuel += haversine(lastOdoPos.lat, lastOdoPos.lon, lat, lon) * 1000;
   }
   lastOdoPos = {lat, lon};
+  let refueled = false;
   ROUTE.forEach(wp => {
-    if(wp.type === 'fuel' && haversine(lat, lon, wp.lat, wp.lon) < 0.3) odoSinceFuel = 0;
+    if(wp.type === 'fuel' && haversine(lat, lon, wp.lat, wp.lon) < 0.3) refueled = true;
   });
-  const FUEL_WARN_M = 180000;
+  fuelStations.forEach(f => {
+    if(haversine(lat, lon, f.lat, f.lon) < 0.15) refueled = true;
+  });
+  if(refueled) odoSinceFuel = 0;
+
+  const warnAtM = fuelRangeKm * 0.85 * 1000; // margen de seguridad: avisa al 85% de la autonomía indicada
   const el = document.getElementById('fuelAlert');
-  if(odoSinceFuel > FUEL_WARN_M){
+  if(odoSinceFuel > warnAtM){
     const next = ROUTE.slice(currentIdx).find(wp => wp.type === 'fuel');
     document.getElementById('fuelText').textContent =
-      `⛽ Llevas ${Math.round(odoSinceFuel/1000)} km sin repostar` + (next ? ` · próxima gasolinera: ${next.name}` : '');
+      `⛽ Llevas ${Math.round(odoSinceFuel/1000)} km sin repostar (autonomía ${fuelRangeKm} km)` + (next ? ` · próxima gasolinera marcada: ${next.name}` : '');
     el.style.display = 'flex';
   } else {
     el.style.display = 'none';
@@ -1106,6 +1138,7 @@ function updateMapMarkers(){
     else if(i === currentIdx) m.setStyle({fillColor:'#ff7a45', color:'#fff', radius:9});
     else m.setStyle({fillColor:'#93a5b3', color:'#fff', radius:7});
   });
+  redrawBaseSegments();
 }
 
 function updateMePosition(lat, lon){
@@ -1650,6 +1683,14 @@ document.getElementById('btnReset').addEventListener('click', () => {
     saveProgress();
     render();
     window.scrollTo({top:0});
+  }
+});
+document.getElementById('fuelRangeInput').value = fuelRangeKm;
+document.getElementById('fuelRangeInput').addEventListener('change', e => {
+  const v = parseFloat(e.target.value);
+  if(!isNaN(v) && v > 0){
+    fuelRangeKm = v;
+    localStorage.setItem('fuelRangeKm', String(v));
   }
 });
 document.getElementById('btnDownloadMaps').addEventListener('click', downloadOfflineMaps);
