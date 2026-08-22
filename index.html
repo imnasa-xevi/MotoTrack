@@ -573,9 +573,9 @@ function renderNextCard(){
   document.getElementById('nextNote').textContent = wp.note || '';
 
   document.getElementById('btnMapsApple').onclick = () => {
-    const stops = ROUTE.slice(currentIdx);
-    const daddr = stops.map(s => `${s.lat},${s.lon}`).join('+to:');
-    window.location.href = `https://maps.apple.com/?daddr=${daddr}&dirflg=d`;
+    // Apple Maps no admite bien varias paradas por enlace (solo deja puntos sueltos,
+    // sin trazar ruta): se envía únicamente el siguiente destino.
+    window.location.href = `https://maps.apple.com/?daddr=${wp.lat},${wp.lon}&dirflg=d`;
   };
   document.getElementById('btnMapsGoogle').onclick = () => {
     const stops = ROUTE.slice(currentIdx);
