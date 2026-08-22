@@ -214,6 +214,7 @@
   <div class="gps-bar">
     <span class="dot" id="gpsDot"></span>
     <span id="gpsText">GPS desactivado</span>
+    <button id="btnPause" style="display:none; margin-left:auto; background:none; border:none; color:var(--muted); text-decoration:underline; font-size:.72rem; padding:4px;">⏸️ Pausar</button>
   </div>
 
   <div id="permCard" class="permcard">
@@ -1705,6 +1706,7 @@ function startWatch(){
     return;
   }
   document.getElementById('permCard').style.display = 'none';
+  document.getElementById('btnPause').style.display = 'inline-block';
   initMap();
   watchId = navigator.geolocation.watchPosition(pos => {
     lastPos = {lat:pos.coords.latitude, lon:pos.coords.longitude, accuracy:pos.coords.accuracy};
@@ -1758,6 +1760,25 @@ document.getElementById('btnEnable').addEventListener('click', () => {
   startWatch();
   requestWakeLock();
   speak('Navegación iniciada');
+});
+let navPaused = false;
+document.getElementById('btnPause').addEventListener('click', () => {
+  const btn = document.getElementById('btnPause');
+  if(!navPaused){
+    navPaused = true;
+    if(watchId !== null){ navigator.geolocation.clearWatch(watchId); watchId = null; }
+    if(wakeLock){ wakeLock.release().catch(()=>{}); wakeLock = null; }
+    document.getElementById('gpsDot').classList.remove('live');
+    document.getElementById('gpsText').textContent = 'Navegación en pausa';
+    btn.textContent = '▶️ Reanudar';
+    speak('Navegación en pausa');
+  } else {
+    navPaused = false;
+    btn.textContent = '⏸️ Pausar';
+    startWatch();
+    requestWakeLock();
+    speak('Navegación reanudada');
+  }
 });
 document.getElementById('btnFollow').addEventListener('click', () => setFollow(!followMode));
 document.getElementById('btnOverview').addEventListener('click', showFullRoute);
