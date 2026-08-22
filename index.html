@@ -228,8 +228,8 @@
   <div class="gps-bar">
     <span class="dot" id="gpsDot"></span>
     <span id="gpsText">GPS desactivado</span>
-    <button id="btnPause" style="display:none; margin-left:auto; background:none; border:none; color:var(--muted); text-decoration:underline; font-size:.72rem; padding:4px;">⏸️ Pausar</button>
   </div>
+  <button class="btn secondary" id="btnPause" style="display:none; margin-bottom:14px;">⏸️ Pausar navegación</button>
 
   <div id="permCard" class="permcard">
     <div style="font-size:2rem;">📍</div>
@@ -1788,11 +1788,13 @@ document.getElementById('btnPause').addEventListener('click', () => {
     if(wakeLock){ wakeLock.release().catch(()=>{}); wakeLock = null; }
     document.getElementById('gpsDot').classList.remove('live');
     document.getElementById('gpsText').textContent = 'Navegación en pausa';
-    btn.textContent = '▶️ Reanudar';
+    btn.textContent = '▶️ Reanudar navegación';
+    btn.classList.remove('secondary');
     speak('Navegación en pausa');
   } else {
     navPaused = false;
-    btn.textContent = '⏸️ Pausar';
+    btn.textContent = '⏸️ Pausar navegación';
+    btn.classList.add('secondary');
     startWatch();
     requestWakeLock();
     speak('Navegación reanudada');
