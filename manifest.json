@@ -1,6 +1,6 @@
 {
-  "name": "Rutas Moto - Navegación GPS",
-  "short_name": "Rutas Moto",
+  "name": "MotoTrack - Navegación GPS",
+  "short_name": "MotoTrack",
   "description": "Navegación paso a paso por GPS para tus rutas en moto, con voz, mapas offline y altimetría",
   "start_url": "./index.html",
   "scope": "./",
