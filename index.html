@@ -295,9 +295,11 @@
       <div class="metric"><div class="val" id="mAcc">—</div><div class="lbl">Precisión GPS</div></div>
     </div>
 
-    <div class="actions">
-      <button class="btn" id="btnMaps">🗺️ Abrir en Maps</button>
-      <button class="btn secondary" id="btnSkip">✓ Saltar</button>
+    <div class="actions" style="flex-wrap:wrap;">
+      <button class="btn secondary" id="btnMapsApple" style="flex:1 1 30%;">🍎 Apple</button>
+      <button class="btn secondary" id="btnMapsGoogle" style="flex:1 1 30%;">📍 Google</button>
+      <button class="btn secondary" id="btnMapsWaze" style="flex:1 1 30%;">🚗 Waze</button>
+      <button class="btn" id="btnSkip" style="flex:1 1 100%;">✓ Saltar</button>
     </div>
 
     <div class="wake-note" id="wakeNote"></div>
@@ -545,8 +547,14 @@ function renderNextCard(){
   document.getElementById('nextName').textContent = wp.name;
   document.getElementById('nextNote').textContent = wp.note || '';
 
-  document.getElementById('btnMaps').onclick = () => {
+  document.getElementById('btnMapsApple').onclick = () => {
     window.location.href = `https://maps.apple.com/?daddr=${wp.lat},${wp.lon}&dirflg=d`;
+  };
+  document.getElementById('btnMapsGoogle').onclick = () => {
+    window.location.href = `https://www.google.com/maps/dir/?api=1&destination=${wp.lat},${wp.lon}&travelmode=driving`;
+  };
+  document.getElementById('btnMapsWaze').onclick = () => {
+    window.location.href = `https://waze.com/ul?ll=${wp.lat},${wp.lon}&navigate=yes`;
   };
 
   if(lastPos){
