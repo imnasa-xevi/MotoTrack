@@ -204,8 +204,12 @@
   .route-row .rr-main{flex:1; min-width:0; cursor:pointer;}
   .route-row .rr-name{font-weight:700; font-size:.92rem;}
   .route-row .rr-count{font-size:.72rem; color:var(--muted); margin-top:2px;}
-  .route-row .rr-btn{background:var(--bg2); border:1px solid var(--border); color:var(--muted); width:32px; height:32px; border-radius:50%; font-size:.85rem; flex:none;}
+  .route-row{flex-wrap:wrap;}
+  .route-row .rr-btn{background:var(--bg2); border:1px solid var(--border); color:var(--muted); width:28px; height:28px; border-radius:50%; font-size:.75rem; flex:none;}
   .route-row .rr-btn.danger{color:var(--danger);}
+
+  .profile-chip{display:flex; align-items:center; justify-content:space-between; gap:8px; background:var(--card); border:1px solid var(--border); border-radius:12px; padding:10px 12px; font-size:.8rem; color:var(--muted);}
+  .profile-chip strong{color:var(--text);}
 
   .field{margin-bottom:14px;}
   .field label{display:block; font-size:.72rem; color:var(--muted); text-transform:uppercase; letter-spacing:.5px; margin-bottom:6px;}
@@ -364,6 +368,33 @@
       <button class="btn secondary" id="btnImportRoute" style="width:auto; flex:1;">📥 Importar</button>
     </div>
     <input type="file" id="importFile" accept=".json,.gpx" style="display:none;">
+
+    <div style="border-top:1px solid var(--border); margin:18px 0 12px;"></div>
+    <div class="sheet-head" style="margin-bottom:8px;">
+      <h3 style="font-size:.92rem;">🌐 Rutas del grupo</h3>
+      <button class="rr-btn" id="btnRefreshShared" title="Actualizar">🔄</button>
+    </div>
+    <div id="sharedRoutesList"><div class="route-status">Crea tu perfil para ver las rutas compartidas</div></div>
+    <div id="profileChip" class="profile-chip" style="display:none; margin-top:10px;">
+      <span id="profileChipText"></span>
+      <button class="rr-btn" id="btnEditProfile" title="Editar perfil">✏️</button>
+    </div>
+  </div>
+</div>
+
+<div id="profileOverlay" class="overlay hidden">
+  <div class="sheet">
+    <div class="sheet-head"><h3 id="profileTitle">Crear tu perfil</h3><button class="sheet-close" id="closeProfile">✕</button></div>
+    <p style="color:var(--muted); font-size:.85rem; margin-top:0;">Con un nombre y un código de grupo (el mismo que use tu compañero) podéis compartir rutas entre vosotros. Tus rutas privadas no se ven afectadas.</p>
+    <div class="field">
+      <label>Tu nombre</label>
+      <input type="text" id="profileName" placeholder="Ej. Xevi">
+    </div>
+    <div class="field">
+      <label>Código de grupo</label>
+      <input type="text" id="profileGroup" placeholder="Ej. pirineos2026xevi">
+    </div>
+    <button class="btn" id="btnSaveProfile">Guardar perfil</button>
   </div>
 </div>
 
@@ -399,6 +430,9 @@
 <div class="toast" id="toast"></div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
 <script>
 /* ---------- Rutas guardadas (por defecto) ---------- */
 const PIRINEOS_WAYPOINTS = [
@@ -1490,6 +1524,7 @@ function renderRoutesList(){
         <div class="rr-name">${r.name}</div>
         <div class="rr-count">${r.waypoints.length} destinos</div>
       </div>
+      <button class="rr-btn" data-action="share" title="Compartir con el grupo">☁️</button>
       <button class="rr-btn" data-action="export" title="Exportar (backup)">📤</button>
       <button class="rr-btn" data-action="exportgpx" title="Exportar GPX (para GPS/otras apps)">🗺️</button>
       <button class="rr-btn" data-action="edit" title="Editar">✏️</button>
@@ -1499,13 +1534,19 @@ function renderRoutesList(){
   el.querySelectorAll('.route-row').forEach(row => {
     const id = row.dataset.id;
     row.querySelector('[data-action="switch"]').addEventListener('click', () => switchRoute(id));
+    row.querySelector('[data-action="share"]').addEventListener('click', () => shareRouteToGroup(id));
     row.querySelector('[data-action="export"]').addEventListener('click', () => exportRoute(id));
     row.querySelector('[data-action="exportgpx"]').addEventListener('click', () => exportRouteGpx(id));
     row.querySelector('[data-action="edit"]').addEventListener('click', () => openEditor(id));
     row.querySelector('[data-action="delete"]').addEventListener('click', () => deleteRoute(id));
   });
 }
-function openRoutesSheet(){ renderRoutesList(); document.getElementById('routesOverlay').classList.remove('hidden'); }
+function openRoutesSheet(){
+  renderRoutesList();
+  updateProfileChip();
+  loadSharedRoutes();
+  document.getElementById('routesOverlay').classList.remove('hidden');
+}
 function closeRoutesSheet(){ document.getElementById('routesOverlay').classList.add('hidden'); }
 function deleteRoute(id){
   if(store.routes.length <= 1){ showToast('Debe quedar al menos una ruta'); return; }
@@ -1674,6 +1715,135 @@ document.getElementById('importFile').addEventListener('change', e => {
   };
   reader.readAsText(file);
 });
+
+/* ---------- Perfil y rutas compartidas (Firebase) ---------- */
+let fbAuth = null, fbDb = null, fbUser = null;
+let profile = null;
+let sharedRoutesCache = [];
+
+function initFirebase(){
+  if(fbAuth) return;
+  firebase.initializeApp({
+    apiKey: "AIzaSyB6GLbwORpD42e1RSwy3SJuc0Ux-xEWPC4",
+    authDomain: "mototrack-57e09.firebaseapp.com",
+    projectId: "mototrack-57e09",
+    storageBucket: "mototrack-57e09.firebasestorage.app",
+    messagingSenderId: "886144285506",
+    appId: "1:886144285506:web:8c669bf4b37873120726db"
+  });
+  fbAuth = firebase.auth();
+  fbDb = firebase.firestore();
+}
+function loadProfile(){
+  try{ profile = JSON.parse(localStorage.getItem('motoProfile') || 'null'); }catch(e){ profile = null; }
+}
+function saveProfileLocal(){
+  try{ localStorage.setItem('motoProfile', JSON.stringify(profile)); }catch(e){}
+}
+function ensureSignedIn(){
+  initFirebase();
+  if(fbUser) return Promise.resolve(fbUser);
+  return new Promise(resolve => {
+    const unsub = fbAuth.onAuthStateChanged(u => {
+      if(u){ fbUser = u; unsub(); resolve(u); }
+    });
+    fbAuth.signInAnonymously().catch(() => resolve(null));
+  });
+}
+function updateProfileChip(){
+  const chip = document.getElementById('profileChip');
+  const txt = document.getElementById('profileChipText');
+  chip.style.display = 'flex';
+  if(profile){
+    txt.innerHTML = `Perfil: <strong>${escapeXml(profile.name)}</strong> · grupo "${escapeXml(profile.groupCode)}"`;
+  } else {
+    txt.textContent = 'Sin perfil creado — no ves rutas compartidas';
+  }
+}
+function openProfileOverlay(){
+  document.getElementById('profileTitle').textContent = profile ? 'Editar perfil' : 'Crear tu perfil';
+  document.getElementById('profileName').value = profile ? profile.name : '';
+  document.getElementById('profileGroup').value = profile ? profile.groupCode : '';
+  document.getElementById('profileOverlay').classList.remove('hidden');
+}
+function closeProfileOverlay(){ document.getElementById('profileOverlay').classList.add('hidden'); }
+
+async function shareRouteToGroup(id){
+  if(!profile){ showToast('Crea primero tu perfil'); openProfileOverlay(); return; }
+  const r = store.routes.find(x => x.id === id);
+  if(!r) return;
+  try{
+    const user = await ensureSignedIn();
+    if(!user) throw new Error('sin conexión');
+    await fbDb.collection('groups').doc(profile.groupCode).collection('routes').doc(r.id).set({
+      name: r.name, waypoints: r.waypoints,
+      ownerId: user.uid, ownerName: profile.name,
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+    showToast('☁️ Ruta compartida con el grupo');
+    loadSharedRoutes();
+  }catch(e){
+    showToast('No se pudo compartir (sin conexión)');
+  }
+}
+async function loadSharedRoutes(){
+  const el = document.getElementById('sharedRoutesList');
+  if(!profile){
+    el.innerHTML = '<div class="route-status">Crea tu perfil para ver las rutas compartidas</div>';
+    return;
+  }
+  el.innerHTML = '<div class="route-status">Cargando…</div>';
+  try{
+    const user = await ensureSignedIn();
+    if(!user) throw new Error('sin auth');
+    const snap = await fbDb.collection('groups').doc(profile.groupCode).collection('routes').get();
+    sharedRoutesCache = [];
+    snap.forEach(doc => sharedRoutesCache.push(Object.assign({id: doc.id}, doc.data())));
+    renderSharedRoutes();
+  }catch(e){
+    el.innerHTML = '<div class="route-status">Sin conexión para cargar rutas compartidas</div>';
+  }
+}
+function renderSharedRoutes(){
+  const el = document.getElementById('sharedRoutesList');
+  if(!sharedRoutesCache.length){
+    el.innerHTML = '<div class="route-status">Nadie ha compartido rutas todavía en este grupo</div>';
+    return;
+  }
+  el.innerHTML = sharedRoutesCache.map(r => `
+    <div class="route-row" data-id="${r.id}">
+      <div class="rr-main">
+        <div class="rr-name">${escapeXml(r.name)}</div>
+        <div class="rr-count">${(r.waypoints||[]).length} destinos · de ${escapeXml(r.ownerName||'?')}</div>
+      </div>
+      <button class="rr-btn" data-action="import" title="Importar a mis rutas">📥</button>
+      ${fbUser && r.ownerId === fbUser.uid ? '<button class="rr-btn danger" data-action="unshare" title="Quitar del grupo">✕</button>' : ''}
+    </div>
+  `).join('');
+  el.querySelectorAll('.route-row').forEach(row => {
+    const id = row.dataset.id;
+    const r = sharedRoutesCache.find(x => x.id === id);
+    const importBtn = row.querySelector('[data-action="import"]');
+    if(importBtn) importBtn.addEventListener('click', () => importSharedRoute(r));
+    const unshareBtn = row.querySelector('[data-action="unshare"]');
+    if(unshareBtn) unshareBtn.addEventListener('click', () => unshareRoute(r.id));
+  });
+}
+function importSharedRoute(r){
+  const id = 'route-' + Date.now() + '-' + Math.floor(Math.random()*1000);
+  store.routes.push({id, name: r.name, waypoints: r.waypoints});
+  store.progress[id] = 0;
+  saveStore();
+  switchRoute(id);
+  showToast('✓ Ruta importada: ' + r.name);
+}
+async function unshareRoute(id){
+  if(!confirm('¿Quitar esta ruta del grupo?')) return;
+  try{
+    await fbDb.collection('groups').doc(profile.groupCode).collection('routes').doc(id).delete();
+    loadSharedRoutes();
+  }catch(e){ showToast('No se pudo eliminar'); }
+}
 
 /* ---------- Descarga de mapas offline ---------- */
 function tileXY(lat, lon, z){
@@ -2055,6 +2225,27 @@ document.getElementById('btnCancelDl').addEventListener('click', () => { dlCance
 document.getElementById('btnRoutes').addEventListener('click', openRoutesSheet);
 document.getElementById('closeRoutes').addEventListener('click', closeRoutesSheet);
 document.getElementById('btnNewRoute').addEventListener('click', () => openEditor(null));
+document.getElementById('btnEditProfile').addEventListener('click', openProfileOverlay);
+document.getElementById('closeProfile').addEventListener('click', closeProfileOverlay);
+document.getElementById('btnRefreshShared').addEventListener('click', loadSharedRoutes);
+document.getElementById('btnSaveProfile').addEventListener('click', async () => {
+  const name = document.getElementById('profileName').value.trim();
+  const groupCode = document.getElementById('profileGroup').value.trim();
+  if(!name || !groupCode){ showToast('Pon un nombre y un código de grupo'); return; }
+  profile = {name, groupCode};
+  saveProfileLocal();
+  updateProfileChip();
+  closeProfileOverlay();
+  try{
+    const user = await ensureSignedIn();
+    if(user){
+      await fbDb.collection('groups').doc(groupCode).collection('members').doc(user.uid).set({
+        name, joinedAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+    }
+  }catch(e){}
+  loadSharedRoutes();
+});
 document.getElementById('closeEditor').addEventListener('click', closeEditor);
 document.getElementById('editorSearch').addEventListener('input', e => {
   clearTimeout(searchDebounce);
@@ -2124,6 +2315,7 @@ render();
 loadPassWeather();
 loadTrackLibrary();
 updateTrackUI();
+loadProfile();
 openRoutesSheet();
 
 if('serviceWorker' in navigator){
