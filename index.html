@@ -1507,7 +1507,17 @@ function setRotateMode(on){
 
 /* ---------- Selector y editor de rutas ---------- */
 function switchRoute(id){
-  if(id === store.activeId){ closeRoutesSheet(); return; }
+  if(id === store.activeId){
+    closeRoutesSheet();
+    const r = activeRouteObj();
+    if(!map){
+      showToast('Ruta activa: ' + r.name + ' — toca "Activar ubicación" para verla');
+    } else {
+      showToast('Ruta activa: ' + r.name);
+      showFullRoute();
+    }
+    return;
+  }
   store.activeId = id;
   saveStore();
   ROUTE = activeRouteObj().waypoints;
