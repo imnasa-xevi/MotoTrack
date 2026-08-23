@@ -216,6 +216,15 @@
   .sheet-head h3{margin:0; font-size:1.05rem;}
   .sheet-close{background:var(--bg2); border:1px solid var(--border); color:var(--text); width:32px; height:32px; border-radius:50%; font-size:1rem; line-height:1;}
 
+  .km-picker-wrap{position:relative; height:180px; overflow:hidden; border-radius:14px; background:var(--card); border:1px solid var(--border);}
+  .km-picker{height:100%; overflow-y:scroll; scroll-snap-type:y mandatory; -webkit-overflow-scrolling:touch; padding:72px 0;}
+  .km-picker::-webkit-scrollbar{display:none;}
+  .km-picker-item{height:36px; display:flex; align-items:center; justify-content:center; font-size:1.05rem; color:var(--muted); scroll-snap-align:center;}
+  .km-picker-item.km-major{font-weight:700; color:var(--text);}
+  .km-picker-item.km-huge{font-weight:800; color:var(--accent); font-size:1.15rem;}
+  .km-picker-highlight{position:absolute; left:10px; right:10px; top:50%; transform:translateY(-18px); height:36px; border-top:1.5px solid var(--accent); border-bottom:1.5px solid var(--accent); pointer-events:none; z-index:1; border-radius:8px;}
+  .km-picker-value{text-align:center; font-size:1.7rem; font-weight:800; margin-top:12px;}
+
   .route-row{display:flex; align-items:center; gap:8px; padding:12px 10px; border-radius:14px; background:var(--card); border:1px solid var(--border); margin-bottom:8px;}
   .route-row.active{border-color:var(--accent);}
   .route-row .rr-main{flex:1; min-width:0; cursor:pointer;}
@@ -414,6 +423,19 @@
       <input type="text" id="profileGroup" placeholder="Ej. pirineos2026xevi">
     </div>
     <button class="btn" id="btnSaveProfile">Guardar perfil</button>
+  </div>
+</div>
+
+<div id="kmOverlay" class="overlay hidden">
+  <div class="sheet">
+    <div class="sheet-head"><h3>Km desde el último repostaje</h3><button class="sheet-close" id="closeKm">✕</button></div>
+    <p style="color:var(--muted); font-size:.82rem; margin:0 0 14px;">Para avisarte cuando te quedes sin gasolina. Desliza hasta el número.</p>
+    <div class="km-picker-wrap">
+      <div class="km-picker-highlight"></div>
+      <div class="km-picker" id="kmPicker"></div>
+    </div>
+    <div class="km-picker-value" id="kmPickerValue">0 km</div>
+    <button class="btn" id="btnKmConfirm" style="width:100%; margin-top:14px;">Continuar</button>
   </div>
 </div>
 
@@ -2291,17 +2313,74 @@ document.addEventListener('visibilitychange', () => {
 });
 
 /* ---------- Eventos ---------- */
+/* Selector de km con scroll (0-300), en vez del prompt() nativo bloqueante:
+   además de quedar más cómodo para elegir el número mientras conduces, evita
+   el bug de iOS donde ese diálogo bloqueante dejaba el mapa mal dimensionado
+   al cerrarse (según si llegaba a aparecer el teclado o no). */
+const KM_PICKER_MAX = 300, KM_PICKER_ITEM_H = 36;
+function openKmPicker(){
+  return new Promise(resolve => {
+    const overlay = document.getElementById('kmOverlay');
+    const picker = document.getElementById('kmPicker');
+    const valueEl = document.getElementById('kmPickerValue');
+    const closeBtn = document.getElementById('closeKm');
+    const confirmBtn = document.getElementById('btnKmConfirm');
+
+    if(!picker.dataset.built){
+      let html = '';
+      for(let i=0;i<=KM_PICKER_MAX;i++){
+        const cls = i % 50 === 0 ? ' km-huge' : (i % 10 === 0 ? ' km-major' : '');
+        html += `<div class="km-picker-item${cls}">${i}</div>`;
+      }
+      picker.innerHTML = html;
+      picker.dataset.built = '1';
+    }
+
+    let selected = 0;
+    const setValue = km => { selected = km; valueEl.textContent = km + ' km'; };
+    setValue(0);
+    picker.scrollTop = 0;
+
+    let scrollTimer = null;
+    function onScroll(){
+      clearTimeout(scrollTimer);
+      scrollTimer = setTimeout(() => {
+        const idx = Math.round(picker.scrollTop / KM_PICKER_ITEM_H);
+        setValue(Math.max(0, Math.min(KM_PICKER_MAX, idx)));
+      }, 80);
+    }
+    picker.addEventListener('scroll', onScroll);
+
+    function cleanup(km){
+      picker.removeEventListener('scroll', onScroll);
+      closeBtn.removeEventListener('click', onClose);
+      confirmBtn.removeEventListener('click', onConfirm);
+      overlay.classList.add('hidden');
+      resolve(km);
+    }
+    function onClose(){ cleanup(null); }
+    function onConfirm(){ cleanup(selected); }
+    closeBtn.addEventListener('click', onClose);
+    confirmBtn.addEventListener('click', onConfirm);
+
+    overlay.classList.remove('hidden');
+  });
+}
+
 document.getElementById('btnEnable').addEventListener('click', () => {
   // Importante: pedir la pantalla-siempre-encendida, la voz y el GPS ANTES del
-  // prompt() de km de gasolina. Un cuadro de diálogo bloqueante en medio puede
-  // hacer que iOS ya no considere estas peticiones parte del mismo gesto del
-  // usuario y las deniegue en silencio (la pantalla se apagaría sola al ratito).
+  // selector de km de gasolina. Un diálogo bloqueante en medio puede hacer que
+  // iOS ya no considere estas peticiones parte del mismo gesto del usuario y
+  // las deniegue en silencio (la pantalla se apagaría sola al ratito).
   requestWakeLock();
   speak('Navegación iniciada');
   startWatch();
-  const kmStr = prompt('¿Cuántos km lleva ya tu moto desde el último repostaje? (para el aviso de gasolina)', '0');
-  const km = parseFloat(kmStr);
-  if(!isNaN(km) && km >= 0) odoSinceFuel = km * 1000;
+  openKmPicker().then(km => {
+    if(km !== null && km >= 0) odoSinceFuel = km * 1000;
+    // Por si el cambio de pantalla del selector deja el mapa desactualizado,
+    // se fuerza a recalcular el tamaño y redibujar.
+    setTimeout(() => { if(map){ sizeRotatableMap(); map.invalidateSize(); } }, 60);
+  });
 });
 let navPaused = false;
 document.getElementById('btnPause').addEventListener('click', () => {

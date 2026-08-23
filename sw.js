@@ -1,4 +1,4 @@
-const CACHE = 'mototrack-v32';
+const CACHE = 'mototrack-v33';
 const ASSETS = ['./', './index.html', './manifest.json', './icons/icon-192.png', './icons/icon-512.png', './icons/icon-180.png'];
 
 self.addEventListener('install', e => {
