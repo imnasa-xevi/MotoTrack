@@ -102,11 +102,13 @@
   .radar-alert .ra-sub{font-size:.75rem; color:var(--muted); margin-top:1px;}
   .radar-dot{width:22px;height:22px;border-radius:50%; background:var(--bg2); border:2px solid var(--danger); display:flex; align-items:center; justify-content:center; font-size:11px; box-shadow:0 1px 4px rgba(0,0,0,.4);}
 
-  .speed-alert{background:var(--card); border:1.5px solid var(--danger); border-radius:16px; padding:12px 16px; display:flex; align-items:center; gap:12px; margin-bottom:10px;}
+  .speed-alert{background:var(--card); border:1.5px solid var(--border); border-radius:16px; padding:12px 16px; display:flex; align-items:center; gap:12px; margin-bottom:10px;}
   .speed-alert .sp-icon{font-size:1.6rem; flex:none;}
   .speed-alert .sp-body{flex:1; min-width:0;}
-  .speed-alert .sp-now{font-size:1.2rem; font-weight:800; color:var(--danger);}
+  .speed-alert .sp-now{font-size:1.2rem; font-weight:800; color:var(--text);}
   .speed-alert .sp-sub{font-size:.75rem; color:var(--muted); margin-top:1px;}
+  .speed-alert.over{border-color:var(--danger);}
+  .speed-alert.over .sp-now{color:var(--danger);}
 
   .fuel-alert{background:var(--card); border:1.5px solid var(--accent); border-radius:16px; padding:12px 16px; display:flex; align-items:center; gap:12px; margin-bottom:10px;}
   .fuel-alert .fa-icon{font-size:1.6rem; flex:none;}
@@ -376,6 +378,11 @@
       <label>Añadir destino</label>
       <input type="text" id="editorSearch" placeholder="Buscar dirección o lugar…">
       <div class="search-results" id="editorResults"></div>
+      <button class="btn small secondary" id="btnToggleEditorMap" style="margin-top:8px;">🗺️ O elegir en el mapa</button>
+      <div id="editorMapWrap" style="display:none; margin-top:8px;">
+        <div id="editorMap" style="height:200px; border-radius:12px; overflow:hidden;"></div>
+        <button class="btn small" id="btnAddMapPoint" style="display:none; width:100%; margin-top:8px;">+ Añadir este punto</button>
+      </div>
     </div>
     <div id="editorStops"></div>
     <button class="btn" id="btnSaveRoute" style="margin-top:10px;">Guardar ruta</button>
@@ -501,7 +508,6 @@ let trackRecording = false;
 let trackPoints = [];
 let maxspeedWays = [];
 let maxspeedFetchedAt = null;
-let speedWarnedRecently = false;
 
 /* ---------- Geometría ---------- */
 function toRad(d){return d*Math.PI/180;}
@@ -1215,20 +1221,19 @@ function checkSpeedWarning(pos){
   const el = document.getElementById('speedAlert');
   const limit = currentSpeedLimit();
   const spd = pos.coords.speed;
-  if(limit === null || spd === null || spd === undefined || isNaN(spd)){
-    el.style.display = 'none';
+  const kmh = (spd !== null && spd !== undefined && !isNaN(spd)) ? Math.round(spd * 3.6) : null;
+
+  if(kmh === null){
+    if(!fullscreenNav) el.style.display = 'none';
     return;
   }
-  const kmh = Math.round(spd * 3.6);
-  if(kmh - limit > 8){
+  const over = limit !== null && (kmh - limit > 8);
+
+  if(over || fullscreenNav){
     el.style.display = 'flex';
+    el.classList.toggle('over', over);
     document.getElementById('speedNow').textContent = kmh + ' km/h';
-    document.getElementById('speedLimitTxt').textContent = 'Límite ' + limit + ' km/h';
-    if(!speedWarnedRecently && kmh - limit > 15){
-      speedWarnedRecently = true;
-      speak('Exceso de velocidad');
-      setTimeout(() => { speedWarnedRecently = false; }, 25000);
-    }
+    document.getElementById('speedLimitTxt').textContent = limit !== null ? ('Límite ' + limit + ' km/h') : 'Sin límite detectado aquí';
   } else {
     el.style.display = 'none';
   }
@@ -1298,7 +1303,7 @@ function updateMePosition(lat, lon){
     meMarker.setLatLng([lat, lon]);
   }
   if(followMode){
-    map.setView([lat, lon], Math.max(map.getZoom(), 14), {animate:true});
+    map.setView([lat, lon], Math.max(map.getZoom(), 16), {animate:true});
   }
 }
 
@@ -1306,7 +1311,7 @@ function setFollow(on){
   followMode = on;
   const btn = document.getElementById('btnFollow');
   btn.classList.toggle('off', !on);
-  if(on && lastPos) map.setView([lastPos.lat, lastPos.lon], Math.max(map.getZoom(),14));
+  if(on && lastPos) map.setView([lastPos.lat, lastPos.lon], Math.max(map.getZoom(),16));
   if(!on && mapRotateMode) setRotateMode(false);
 }
 
@@ -1431,6 +1436,10 @@ function openEditor(id){
   editorStops = route ? route.waypoints.map(w => ({...w})) : [];
   document.getElementById('editorResults').innerHTML = '';
   document.getElementById('editorSearch').value = '';
+  document.getElementById('editorMapWrap').style.display = 'none';
+  if(editorMapMarker && editorMap){ editorMap.removeLayer(editorMapMarker); editorMapMarker = null; }
+  editorMapPick = null;
+  document.getElementById('btnAddMapPoint').style.display = 'none';
   renderEditorStops();
   document.getElementById('editorOverlay').classList.remove('hidden');
   closeRoutesSheet();
@@ -1822,6 +1831,9 @@ document.addEventListener('visibilitychange', async () => {
 
 /* ---------- Eventos ---------- */
 document.getElementById('btnEnable').addEventListener('click', () => {
+  const kmStr = prompt('¿Cuántos km lleva ya tu moto desde el último repostaje? (para el aviso de gasolina)', '0');
+  const km = parseFloat(kmStr);
+  if(!isNaN(km) && km >= 0) odoSinceFuel = km * 1000;
   startWatch();
   requestWakeLock();
   speak('Navegación iniciada');
@@ -1921,6 +1933,44 @@ document.getElementById('editorSearch').addEventListener('input', e => {
   const q = e.target.value;
   searchDebounce = setTimeout(() => runSearch(q), 500);
 });
+
+/* ---------- Elegir destino tocando el mapa (alternativa al buscador) ---------- */
+let editorMap = null, editorMapMarker = null, editorMapPick = null;
+document.getElementById('btnToggleEditorMap').addEventListener('click', () => {
+  const wrap = document.getElementById('editorMapWrap');
+  const showing = wrap.style.display !== 'none';
+  if(showing){ wrap.style.display = 'none'; return; }
+  wrap.style.display = 'block';
+  if(!editorMap){
+    const center = editorStops.length ? [editorStops[editorStops.length-1].lat, editorStops[editorStops.length-1].lon] : [41.98, 2.82];
+    editorMap = L.map('editorMap').setView(center, 8);
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {maxZoom:18, attribution:'&copy; OpenStreetMap'}).addTo(editorMap);
+    editorMap.on('click', e => {
+      editorMapPick = e.latlng;
+      if(editorMapMarker) editorMap.removeLayer(editorMapMarker);
+      editorMapMarker = L.marker(e.latlng).addTo(editorMap);
+      document.getElementById('btnAddMapPoint').style.display = 'block';
+    });
+  }
+  setTimeout(() => editorMap.invalidateSize(), 50);
+});
+document.getElementById('btnAddMapPoint').addEventListener('click', async () => {
+  if(!editorMapPick) return;
+  const lat = editorMapPick.lat, lon = editorMapPick.lng;
+  let name = `Punto (${lat.toFixed(4)}, ${lon.toFixed(4)})`;
+  try{
+    const res = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json`);
+    const data = await res.json();
+    if(data && data.display_name) name = data.display_name.split(',')[0];
+  }catch(e){}
+  editorStops.push({name, type:'city', lat, lon, note:'', radius:0.5, day:''});
+  renderEditorStops();
+  showToast('✓ Punto añadido: ' + name);
+  editorMap.removeLayer(editorMapMarker);
+  editorMapMarker = null;
+  editorMapPick = null;
+  document.getElementById('btnAddMapPoint').style.display = 'none';
+});
 document.getElementById('btnSaveRoute').addEventListener('click', () => {
   const name = document.getElementById('editorName').value.trim() || 'Ruta sin nombre';
   if(!editorStops.length){ showToast('Añade al menos un destino'); return; }
@@ -1945,6 +1995,7 @@ window.addEventListener('resize', () => { if(map) sizeRotatableMap(); });
 render();
 loadPassWeather();
 loadTrackState();
+openRoutesSheet();
 
 if('serviceWorker' in navigator){
   window.addEventListener('load', () => {
