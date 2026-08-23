@@ -2245,7 +2245,11 @@ function startWatch(){
   }
   document.getElementById('permCard').style.display = 'none';
   document.getElementById('navSessionBtns').style.display = 'flex';
-  initMap();
+  // El mapa NO se crea aquí: si ya existe (p. ej. al reanudar tras pausar) no
+  // pasa nada, y si es la primera vez se crea después de cerrar el selector
+  // de km (ver btnEnable), para que Leaflet nunca tenga que calcular su
+  // tamaño mientras ese panel lo tapa por encima.
+  if(map) sizeRotatableMap();
   watchId = navigator.geolocation.watchPosition(pos => {
     lastPos = {lat:pos.coords.latitude, lon:pos.coords.longitude, accuracy:pos.coords.accuracy};
     const h = pos.coords.heading;
@@ -2377,8 +2381,11 @@ document.getElementById('btnEnable').addEventListener('click', () => {
   startWatch();
   openKmPicker().then(km => {
     if(km !== null && km >= 0) odoSinceFuel = km * 1000;
-    // Por si el cambio de pantalla del selector deja el mapa desactualizado,
-    // se fuerza a recalcular el tamaño y redibujar.
+    // El mapa (Leaflet) se crea aquí, una vez cerrado el selector de km y con
+    // la pantalla ya en su estado final: así Leaflet calcula su tamaño una
+    // sola vez, correctamente, en vez de mientras el selector lo tapaba por
+    // encima (esa era la causa real de que a veces se quedara en blanco).
+    initMap();
     setTimeout(() => { if(map){ sizeRotatableMap(); map.invalidateSize(); } }, 60);
   });
 });
