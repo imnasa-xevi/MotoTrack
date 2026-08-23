@@ -1092,9 +1092,10 @@ function redrawBaseSegments(){
     seg.addTo(map);
     baseLineSegments.push(seg);
   }
-  // Los tramos se añaden después que los marcadores de destino y quedarían por
-  // encima tapándolos; se traen los marcadores al frente para que se vean todos.
-  wpMarkers.forEach(m => m.bringToFront());
+  // A diferencia de los circleMarker de antes, wpMarkers ahora son L.marker
+  // (para poder numerarlos): viven en el "marker pane" de Leaflet, que ya
+  // está por encima del pane de los tramos, así que no hace falta (ni existe
+  // el método) traerlos al frente manualmente.
 }
 
 async function loadFullRouteGeometry(){
