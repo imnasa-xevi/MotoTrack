@@ -1107,7 +1107,10 @@ async function loadFullRouteGeometry(){
     const cached = localStorage.getItem(cacheKey);
     if(cached){
       const parsed = JSON.parse(cached);
-      if(Array.isArray(parsed) && parsed.length === ROUTE.length - 1){
+      // Solo se confía en la caché si están TODOS los tramos (ninguno null):
+      // si en su día algún tramo falló al pedirse (red inestable, etc.), no
+      // queremos quedarnos con esa línea recta guardada para siempre.
+      if(Array.isArray(parsed) && parsed.length === ROUTE.length - 1 && parsed.every(g => g)){
         fullRouteGeoms = parsed;
         redrawBaseSegments();
         return;
@@ -1125,7 +1128,12 @@ async function loadFullRouteGeometry(){
     redrawBaseSegments();
     await sleep(80);
   }
-  try{ localStorage.setItem(cacheKey, JSON.stringify(fullRouteGeoms)); }catch(e){}
+  // Solo se guarda en caché si se consiguieron TODOS los tramos: una caché
+  // parcial (con huecos) se reutilizaría para siempre y dejaría líneas rectas
+  // permanentes aunque la próxima vez sí hubiera conexión para completarlas.
+  if(fullRouteGeoms.every(g => g)){
+    try{ localStorage.setItem(cacheKey, JSON.stringify(fullRouteGeoms)); }catch(e){}
+  }
 
   // rebuildMapForRoute() (quien llama a esta función) se ejecuta al activar
   // la ubicación, ANTES de que llegue la primera posición GPS real. Si aún
