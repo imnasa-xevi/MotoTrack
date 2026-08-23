@@ -1000,6 +1000,12 @@ function rebuildMapForRoute(){
   document.getElementById('radarAlert').style.display = 'none';
   fuelStations = [];
 
+  // Se desactiva "seguir" al (re)construir la ruta: si no, en cuanto llegue la
+  // siguiente posición GPS (unos segundos después) el mapa se recentraría solo
+  // en tu ubicación actual y deshacía la vista de la ruta completa que se
+  // acaba de mostrar. El usuario reactiva "seguir" (🎯) cuando quiera navegar.
+  setFollow(false);
+
   const fitLine = L.polyline(ROUTE.map(w => [w.lat, w.lon]));
   map.fitBounds(fitLine.getBounds(), {padding:[28,28]});
 
