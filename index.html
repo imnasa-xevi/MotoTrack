@@ -110,6 +110,10 @@
   body.fullscreen-nav-active{overflow:hidden;}
   .me-dot{width:30px;height:30px;border-radius:50%; background:#3ecf8e; border:3px solid #fff; box-shadow:0 0 0 4px rgba(62,207,142,.3); display:flex; align-items:center; justify-content:center; font-size:16px; line-height:1;}
   .companion-dot{width:28px;height:28px;border-radius:50%; background:#a855f7; border:3px solid #fff; box-shadow:0 0 0 4px rgba(168,85,247,.3); display:flex; align-items:center; justify-content:center; color:#fff; font-weight:800; font-size:.72rem; line-height:1;}
+  .wp-dot{width:22px;height:22px;border-radius:50%; border:2px solid #fff; box-shadow:0 1px 4px rgba(0,0,0,.5); display:flex; align-items:center; justify-content:center; color:#0b1116; font-weight:800; font-size:.68rem; line-height:1;}
+  .wp-dot.visited{background:#3ecf8e;}
+  .wp-dot.current{width:27px; height:27px; background:#ff7a45; font-size:.78rem;}
+  .wp-dot.upcoming{background:#93a5b3;}
   .wake-note{font-size:.68rem; color:var(--muted); text-align:center; margin-top:10px; line-height:1.4;}
 
   .radar-alert{background:var(--card); border:1.5px solid var(--danger); border-radius:16px; padding:12px 16px; display:flex; align-items:center; gap:12px; margin-bottom:10px;}
@@ -1052,9 +1056,9 @@ function rebuildMapForRoute(){
   const fitLine = L.polyline(fitPoints);
   map.fitBounds(fitLine.getBounds(), {padding:[28,28]});
 
-  wpMarkers = ROUTE.map(wp => L.circleMarker([wp.lat, wp.lon], {
-    radius:7, weight:2, color:'#fff', fillColor:'#93a5b3', fillOpacity:1
-  }).addTo(map).bindPopup(wp.name));
+  wpMarkers = ROUTE.map((wp, i) => L.marker([wp.lat, wp.lon], {
+    icon: L.divIcon({className:'', html:`<div class="wp-dot upcoming">${i+1}</div>`, iconSize:[22,22]})
+  }).addTo(map).bindPopup(`${i+1}. ${wp.name}`));
   updateMapMarkers();
   loadRadars();
   loadFuelStations();
@@ -1520,9 +1524,9 @@ function closeTracksSheet(){ document.getElementById('tracksOverlay').classList.
 function updateMapMarkers(){
   if(!map) return;
   wpMarkers.forEach((m, i) => {
-    if(i < currentIdx) m.setStyle({fillColor:'#3ecf8e', color:'#fff', radius:7});
-    else if(i === currentIdx) m.setStyle({fillColor:'#ff7a45', color:'#fff', radius:9});
-    else m.setStyle({fillColor:'#93a5b3', color:'#fff', radius:7});
+    const cls = i < currentIdx ? 'visited' : (i === currentIdx ? 'current' : 'upcoming');
+    const size = cls === 'current' ? 27 : 22;
+    m.setIcon(L.divIcon({className:'', html:`<div class="wp-dot ${cls}">${i+1}</div>`, iconSize:[size, size]}));
   });
   redrawBaseSegments();
 }
