@@ -2196,12 +2196,16 @@ document.addEventListener('visibilitychange', async () => {
 
 /* ---------- Eventos ---------- */
 document.getElementById('btnEnable').addEventListener('click', () => {
+  // Importante: pedir la pantalla-siempre-encendida, la voz y el GPS ANTES del
+  // prompt() de km de gasolina. Un cuadro de diálogo bloqueante en medio puede
+  // hacer que iOS ya no considere estas peticiones parte del mismo gesto del
+  // usuario y las deniegue en silencio (la pantalla se apagaría sola al ratito).
+  requestWakeLock();
+  speak('Navegación iniciada');
+  startWatch();
   const kmStr = prompt('¿Cuántos km lleva ya tu moto desde el último repostaje? (para el aviso de gasolina)', '0');
   const km = parseFloat(kmStr);
   if(!isNaN(km) && km >= 0) odoSinceFuel = km * 1000;
-  startWatch();
-  requestWakeLock();
-  speak('Navegación iniciada');
 });
 let navPaused = false;
 document.getElementById('btnPause').addEventListener('click', () => {
