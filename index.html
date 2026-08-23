@@ -246,7 +246,10 @@
     <span class="dot" id="gpsDot"></span>
     <span id="gpsText">GPS desactivado</span>
   </div>
-  <button class="btn secondary" id="btnPause" style="display:none; margin-bottom:14px;">⏸️ Pausar navegación</button>
+  <div id="navSessionBtns" style="display:none; gap:8px; margin-bottom:14px;">
+    <button class="btn secondary" id="btnPause" style="flex:2;">⏸️ Pausar navegación</button>
+    <button class="btn secondary" id="btnStop" style="flex:1; color:var(--danger); border-color:var(--danger);">🛑 Terminar</button>
+  </div>
 
   <div id="permCard" class="permcard">
     <div style="font-size:2rem;">📍</div>
@@ -309,13 +312,10 @@
 
   <div id="trackCard" class="track-card" style="display:none;">
     <div class="tc-row">
-      <div class="tc-info" id="trackInfo">Trayecto no grabado</div>
+      <div class="tc-info" id="trackInfo">Ningún trayecto grabado</div>
       <button class="btn small secondary" id="btnTrackToggle">🔴 Grabar trayecto</button>
     </div>
-    <div class="track-actions" id="trackActions" style="display:none;">
-      <button class="btn small secondary" id="btnTrackExport">📤 Exportar GPX</button>
-      <button class="btn small secondary" id="btnTrackClear">🗑️ Borrar</button>
-    </div>
+    <button class="btn small secondary" id="btnOpenTracks" style="width:100%; margin-top:8px;">📼 Ver trayectos guardados</button>
   </div>
 
   <details id="elevCard" class="elev-card" style="display:none;">
@@ -364,6 +364,13 @@
       <button class="btn secondary" id="btnImportRoute" style="width:auto; flex:1;">📥 Importar</button>
     </div>
     <input type="file" id="importFile" accept=".json,.gpx" style="display:none;">
+  </div>
+</div>
+
+<div id="tracksOverlay" class="overlay hidden">
+  <div class="sheet">
+    <div class="sheet-head"><h3>Trayectos grabados</h3><button class="sheet-close" id="closeTracks">✕</button></div>
+    <div id="tracksList"></div>
   </div>
 </div>
 
@@ -482,6 +489,7 @@ let lastPos = null;
 let watchId = null;
 let wakeLock = null;
 let map = null, meMarker = null, wpMarkers = [], routeLine = null, baseLineSegments = [];
+let lightTileLayer = null, darkTileLayer = null;
 let fullRouteGeoms = [];
 let followMode = true;
 let routeModel = null;
@@ -505,7 +513,10 @@ let stoppedAtFuelKey = null;
 let stoppedAtFuelSince = null;
 let lastFixForSpeed = null;
 let trackRecording = false;
-let trackPoints = [];
+let trackLibrary = [];
+let currentTrackPoints = [];
+let currentTrackId = null;
+let currentTrackName = null;
 let maxspeedWays = [];
 let maxspeedFetchedAt = null;
 
@@ -910,12 +921,31 @@ function initMap(){
   document.getElementById('trackCard').style.display = 'block';
   sizeRotatableMap();
   map = L.map('map', {zoomControl:false, attributionControl:true});
-  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  lightTileLayer = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
     maxZoom:18, attribution:'&copy; OpenStreetMap'
   }).addTo(map);
+  darkTileLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+    maxZoom:18, attribution:'&copy; OpenStreetMap &copy; CARTO', subdomains:'abcd'
+  });
   map.on('dragstart', () => setFollow(false));
   rebuildMapForRoute();
   renderElevationProfile();
+}
+
+function isNightHour(){
+  const h = new Date().getHours();
+  return h < 7 || h >= 21;
+}
+function applyMapTheme(){
+  if(!map || !lightTileLayer || !darkTileLayer) return;
+  const wantDark = fullscreenNav && isNightHour();
+  if(wantDark && !map.hasLayer(darkTileLayer)){
+    map.removeLayer(lightTileLayer);
+    darkTileLayer.addTo(map);
+  } else if(!wantDark && !map.hasLayer(lightTileLayer)){
+    map.removeLayer(darkTileLayer);
+    lightTileLayer.addTo(map);
+  }
 }
 
 function rebuildMapForRoute(){
@@ -1072,6 +1102,31 @@ function checkRadarAlerts(){
   } else {
     hideRadarAlert();
   }
+}
+
+// Además del volcado inicial de radares de toda la ruta, se van ampliando según
+// la posición real: así funcionan también al grabar un trayecto libre sin ruta,
+// o si te sales del corredor que se cubrió al activar la ruta.
+let lastRadarFetchPos = null;
+async function maybeLoadLocalRadars(lat, lon){
+  if(lastRadarFetchPos && haversine(lastRadarFetchPos.lat, lastRadarFetchPos.lon, lat, lon) < 3) return;
+  lastRadarFetchPos = {lat, lon};
+  const d = 0.05;
+  const q = `[out:json][timeout:20];(node["highway"="speed_camera"](${lat-d},${lon-d},${lat+d},${lon+d});node["enforcement"="maxspeed"](${lat-d},${lon-d},${lat+d},${lon+d}););out body;`;
+  try{
+    const res = await fetch('https://overpass-api.de/api/interpreter', {method:'POST', body:'data=' + encodeURIComponent(q)});
+    const data = await res.json();
+    const known = new Set(radarPoints.map(r => r.id));
+    let added = false;
+    (data.elements||[]).forEach(e => {
+      if(!known.has(e.id)){
+        radarPoints.push({id:e.id, lat:e.lat, lon:e.lon, maxspeed: e.tags && e.tags.maxspeed ? e.tags.maxspeed : null});
+        known.add(e.id);
+        added = true;
+      }
+    });
+    if(added) renderRadarMarkers();
+  }catch(e){ /* se mantienen los radares ya conocidos */ }
 }
 
 /* ---------- Aviso de repostaje ---------- */
@@ -1239,50 +1294,90 @@ function checkSpeedWarning(pos){
   }
 }
 
-/* ---------- Grabar trayecto real ---------- */
-function trackKey(){ return 'track_' + store.activeId; }
-function loadTrackState(){
-  try{
-    const raw = localStorage.getItem(trackKey());
-    trackPoints = raw ? JSON.parse(raw) : [];
-  }catch(e){ trackPoints = []; }
-  trackRecording = false;
-  updateTrackUI();
+/* ---------- Trayectos grabados (independientes de la ruta) ---------- */
+function loadTrackLibrary(){
+  try{ trackLibrary = JSON.parse(localStorage.getItem('trackLibrary') || '[]'); }catch(e){ trackLibrary = []; }
 }
-function saveTrackState(){
-  try{ localStorage.setItem(trackKey(), JSON.stringify(trackPoints)); }catch(e){}
+function saveTrackLibrary(){
+  try{ localStorage.setItem('trackLibrary', JSON.stringify(trackLibrary)); }catch(e){}
 }
 function updateTrackUI(){
   const info = document.getElementById('trackInfo');
-  const actions = document.getElementById('trackActions');
   const btn = document.getElementById('btnTrackToggle');
   if(!info) return;
-  if(trackRecording) info.textContent = `🔴 Grabando… ${trackPoints.length} puntos`;
-  else if(trackPoints.length) info.textContent = `⏸️ ${trackPoints.length} puntos guardados`;
-  else info.textContent = 'Trayecto no grabado';
-  actions.style.display = trackPoints.length ? 'flex' : 'none';
-  btn.textContent = trackRecording ? '⏸️ Detener' : '🔴 Grabar trayecto';
+  if(trackRecording) info.textContent = `🔴 Grabando "${currentTrackName}"… ${currentTrackPoints.length} puntos`;
+  else info.textContent = trackLibrary.length ? `${trackLibrary.length} trayecto(s) guardado(s)` : 'Ningún trayecto grabado';
+  btn.textContent = trackRecording ? '⏸️ Detener grabación' : '🔴 Grabar trayecto';
 }
 function maybeRecordTrackPoint(lat, lon){
   if(!trackRecording) return;
-  const last = trackPoints[trackPoints.length-1];
+  const last = currentTrackPoints[currentTrackPoints.length-1];
   if(last && haversine(last.lat, last.lon, lat, lon) * 1000 < 20) return;
-  trackPoints.push({lat, lon, t: Date.now()});
-  if(trackPoints.length % 10 === 0) saveTrackState();
+  currentTrackPoints.push({lat, lon, t: Date.now()});
+  if(currentTrackPoints.length % 15 === 0){
+    const idx = trackLibrary.findIndex(t => t.id === currentTrackId);
+    if(idx >= 0){ trackLibrary[idx].points = currentTrackPoints; saveTrackLibrary(); }
+  }
   updateTrackUI();
 }
-function trackToGpx(){
-  const pts = trackPoints.map(p => `      <trkpt lat="${p.lat}" lon="${p.lon}"><time>${new Date(p.t).toISOString()}</time></trkpt>`).join('\n');
+function trackToGpx(track){
+  const pts = track.points.map(p => `      <trkpt lat="${p.lat}" lon="${p.lon}"><time>${new Date(p.t).toISOString()}</time></trkpt>`).join('\n');
   return `<?xml version="1.0" encoding="UTF-8"?>
 <gpx version="1.1" creator="MotoTrack" xmlns="http://www.topografix.com/GPX/1/1">
   <trk>
-    <name>${escapeXml(activeRouteObj().name)}</name>
+    <name>${escapeXml(track.name)}</name>
     <trkseg>
 ${pts}
     </trkseg>
   </trk>
 </gpx>`;
 }
+
+/* ---------- Ver los trayectos guardados ---------- */
+let viewedTrackLine = null;
+function renderTracksList(){
+  const el = document.getElementById('tracksList');
+  if(!trackLibrary.length){
+    el.innerHTML = '<div class="route-status">Todavía no has grabado ningún trayecto</div>';
+    return;
+  }
+  el.innerHTML = trackLibrary.slice().reverse().map(t => `
+    <div class="route-row" data-id="${t.id}">
+      <div class="rr-main" data-action="view">
+        <div class="rr-name">${escapeXml(t.name)}</div>
+        <div class="rr-count">${t.points.length} puntos · ${new Date(t.createdAt).toLocaleDateString('es-ES')}</div>
+      </div>
+      <button class="rr-btn" data-action="export" title="Exportar GPX">📤</button>
+      <button class="rr-btn danger" data-action="delete" title="Eliminar">✕</button>
+    </div>
+  `).join('');
+  el.querySelectorAll('.route-row').forEach(row => {
+    const id = row.dataset.id;
+    row.querySelector('[data-action="view"]').addEventListener('click', () => viewTrack(id));
+    row.querySelector('[data-action="export"]').addEventListener('click', () => {
+      const t = trackLibrary.find(x=>x.id===id);
+      if(t) downloadFile(t.name.replace(/[^\w\-]+/g,'_') + '.gpx', trackToGpx(t), 'application/gpx+xml');
+    });
+    row.querySelector('[data-action="delete"]').addEventListener('click', () => {
+      if(!confirm('¿Eliminar este trayecto grabado?')) return;
+      trackLibrary = trackLibrary.filter(x => x.id !== id);
+      saveTrackLibrary();
+      renderTracksList();
+    });
+  });
+}
+function viewTrack(id){
+  const t = trackLibrary.find(x=>x.id===id);
+  if(!t || !map || t.points.length < 2) return;
+  if(viewedTrackLine) map.removeLayer(viewedTrackLine);
+  viewedTrackLine = L.polyline(t.points.map(p=>[p.lat,p.lon]), {color:'#c77dff', weight:4, opacity:.85, dashArray:'2 8'}).addTo(map);
+  map.fitBounds(viewedTrackLine.getBounds(), {padding:[28,28]});
+  setFollow(false);
+  closeTracksSheet();
+  showToast('Trayecto "' + t.name + '" en el mapa');
+}
+function openTracksSheet(){ renderTracksList(); document.getElementById('tracksOverlay').classList.remove('hidden'); }
+function closeTracksSheet(){ document.getElementById('tracksOverlay').classList.add('hidden'); }
 
 function updateMapMarkers(){
   if(!map) return;
@@ -1349,6 +1444,7 @@ function toggleFullscreenNav(){
     btn.textContent = '⛶';
     btn.title = 'Pantalla completa';
   }
+  applyMapTheme();
   sizeRotatableMap();
   setTimeout(() => { if(map) map.invalidateSize(); }, 60);
 }
@@ -1383,7 +1479,6 @@ function switchRoute(id){
   renderElevationProfile();
   loadPassWeather();
   resetFuelTracking();
-  loadTrackState();
   closeRoutesSheet();
 }
 
@@ -1780,7 +1875,7 @@ function startWatch(){
     return;
   }
   document.getElementById('permCard').style.display = 'none';
-  document.getElementById('btnPause').style.display = 'inline-block';
+  document.getElementById('navSessionBtns').style.display = 'flex';
   initMap();
   watchId = navigator.geolocation.watchPosition(pos => {
     lastPos = {lat:pos.coords.latitude, lon:pos.coords.longitude, accuracy:pos.coords.accuracy};
@@ -1793,6 +1888,7 @@ function startWatch(){
     updateMePosition(lastPos.lat, lastPos.lon);
     applyMapRotation();
     checkRadarAlerts();
+    maybeLoadLocalRadars(lastPos.lat, lastPos.lon);
     updateFuelTracking(lastPos.lat, lastPos.lon, estimateSpeedMS(pos));
     checkSpeedWarning(pos);
     maybeLoadMaxspeed();
@@ -1859,6 +1955,26 @@ document.getElementById('btnPause').addEventListener('click', () => {
     speak('Navegación reanudada');
   }
 });
+document.getElementById('btnStop').addEventListener('click', () => {
+  if(!confirm('¿Terminar la navegación y volver al inicio? El progreso de la ruta y los trayectos grabados no se pierden.')) return;
+  if(watchId !== null){ navigator.geolocation.clearWatch(watchId); watchId = null; }
+  if(wakeLock){ wakeLock.release().catch(()=>{}); wakeLock = null; }
+  if(fullscreenNav) toggleFullscreenNav();
+  if(trackRecording) document.getElementById('btnTrackToggle').click();
+  navPaused = false;
+  const pauseBtn = document.getElementById('btnPause');
+  pauseBtn.textContent = '⏸️ Pausar navegación';
+  pauseBtn.classList.add('secondary');
+  document.getElementById('navSessionBtns').style.display = 'none';
+  document.getElementById('gpsDot').classList.remove('live');
+  document.getElementById('gpsText').textContent = 'GPS desactivado';
+  ['navBanner','mapCard','offlineCard','elevCard','trackCard'].forEach(id => {
+    document.getElementById(id).style.display = 'none';
+  });
+  document.getElementById('permCard').style.display = 'block';
+  speak('Navegación terminada');
+  window.scrollTo({top:0, behavior:'smooth'});
+});
 document.getElementById('btnFollow').addEventListener('click', () => setFollow(!followMode));
 document.getElementById('btnOverview').addEventListener('click', showFullRoute);
 document.getElementById('btnFullscreenMap').addEventListener('click', toggleFullscreenNav);
@@ -1881,21 +1997,33 @@ document.getElementById('btnRecalc').addEventListener('click', () => {
   maybeRecomputeRoute(true);
 });
 document.getElementById('btnTrackToggle').addEventListener('click', () => {
-  trackRecording = !trackRecording;
-  if(trackRecording) speak('Grabación de trayecto iniciada');
-  saveTrackState();
+  if(!trackRecording){
+    const name = prompt('Nombre para este trayecto', 'Trayecto ' + new Date().toLocaleDateString('es-ES'));
+    if(name === null) return; // cancelado
+    currentTrackName = name.trim() || ('Trayecto ' + new Date().toLocaleDateString('es-ES'));
+    currentTrackId = 'trk-' + Date.now();
+    currentTrackPoints = [];
+    trackLibrary.push({id: currentTrackId, name: currentTrackName, createdAt: Date.now(), points: currentTrackPoints});
+    saveTrackLibrary();
+    trackRecording = true;
+    speak('Grabación de trayecto iniciada');
+  } else {
+    trackRecording = false;
+    const idx = trackLibrary.findIndex(t => t.id === currentTrackId);
+    if(idx >= 0){
+      if(currentTrackPoints.length < 2){ trackLibrary.splice(idx,1); }
+      else { trackLibrary[idx].points = currentTrackPoints; }
+      saveTrackLibrary();
+    }
+    currentTrackId = null;
+    currentTrackName = null;
+    currentTrackPoints = [];
+    speak('Grabación detenida');
+  }
   updateTrackUI();
 });
-document.getElementById('btnTrackExport').addEventListener('click', () => {
-  if(!trackPoints.length) return;
-  downloadFile('trayecto_' + activeRouteObj().name.replace(/[^\w\-]+/g,'_') + '.gpx', trackToGpx(), 'application/gpx+xml');
-});
-document.getElementById('btnTrackClear').addEventListener('click', () => {
-  if(!confirm('¿Borrar el trayecto grabado?')) return;
-  trackPoints = [];
-  saveTrackState();
-  updateTrackUI();
-});
+document.getElementById('btnOpenTracks').addEventListener('click', openTracksSheet);
+document.getElementById('closeTracks').addEventListener('click', closeTracksSheet);
 document.getElementById('btnSkip').addEventListener('click', () => {
   if(currentIdx < ROUTE.length-1){
     currentIdx++;
@@ -1994,7 +2122,8 @@ window.addEventListener('resize', () => { if(map) sizeRotatableMap(); });
 
 render();
 loadPassWeather();
-loadTrackState();
+loadTrackLibrary();
+updateTrackUI();
 openRoutesSheet();
 
 if('serviceWorker' in navigator){
