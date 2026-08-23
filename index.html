@@ -55,6 +55,7 @@
   .btn{background:var(--accent); color:#1a0e07; font-weight:700; padding:13px 20px; border-radius:12px; font-size:.95rem; width:100%;}
   .btn:active{opacity:.8;}
   .btn.secondary{background:var(--bg2); color:var(--text); border:1px solid var(--border);}
+  .btn.secondary.active{background:var(--accent2); color:#07281a; border:none;}
   .btn.small{width:auto; padding:9px 14px; font-size:.8rem; border-radius:10px;}
 
   .next-card{background:linear-gradient(155deg,var(--card),var(--bg2)); border:1px solid var(--border); border-radius:20px; padding:20px; position:relative; overflow:hidden;}
@@ -92,7 +93,8 @@
   #navCol.overlay-nav{position:absolute; top:60px; left:10px; right:10px; z-index:1500; display:flex; flex-direction:column; pointer-events:none;}
   #navCol.overlay-nav > *{pointer-events:auto;}
   body.fullscreen-nav-active{overflow:hidden;}
-  .me-dot{width:16px;height:16px;border-radius:50%; background:#3ecf8e; border:3px solid #fff; box-shadow:0 0 0 4px rgba(62,207,142,.3);}
+  .me-dot{width:30px;height:30px;border-radius:50%; background:#3ecf8e; border:3px solid #fff; box-shadow:0 0 0 4px rgba(62,207,142,.3); display:flex; align-items:center; justify-content:center; font-size:16px; line-height:1;}
+  .companion-dot{width:28px;height:28px;border-radius:50%; background:#a855f7; border:3px solid #fff; box-shadow:0 0 0 4px rgba(168,85,247,.3); display:flex; align-items:center; justify-content:center; color:#fff; font-weight:800; font-size:.72rem; line-height:1;}
   .wake-note{font-size:.68rem; color:var(--muted); text-align:center; margin-top:10px; line-height:1.4;}
 
   .radar-alert{background:var(--card); border:1.5px solid var(--danger); border-radius:16px; padding:12px 16px; display:flex; align-items:center; gap:12px; margin-bottom:10px;}
@@ -320,6 +322,7 @@
       <button class="btn small secondary" id="btnTrackToggle">🔴 Grabar trayecto</button>
     </div>
     <button class="btn small secondary" id="btnOpenTracks" style="width:100%; margin-top:8px;">📼 Ver trayectos guardados</button>
+    <button class="btn small secondary" id="btnShareLocation" style="width:100%; margin-top:8px;">👥 Compartir posición con el grupo</button>
   </div>
 
   <details id="elevCard" class="elev-card" style="display:none;">
@@ -1425,7 +1428,7 @@ function updateMapMarkers(){
 
 function updateMePosition(lat, lon){
   if(!map) return;
-  const icon = L.divIcon({className:'', html:'<div class="me-dot"></div>', iconSize:[16,16]});
+  const icon = L.divIcon({className:'', html:'<div class="me-dot">🏍️</div>', iconSize:[30,30]});
   if(!meMarker){
     meMarker = L.marker([lat, lon], {icon, zIndexOffset:1000}).addTo(map);
   } else {
@@ -1845,6 +1848,85 @@ async function unshareRoute(id){
   }catch(e){ showToast('No se pudo eliminar'); }
 }
 
+/* ---------- Ver la posición del grupo en el mapa ---------- */
+let positionSharingOn = false;
+let lastShareWrite = 0;
+let companionMarkers = {};
+let positionsUnsub = null;
+
+function updateShareBtn(){
+  const btn = document.getElementById('btnShareLocation');
+  if(!btn) return;
+  btn.textContent = positionSharingOn ? '👥 Dejar de compartir posición' : '👥 Compartir posición con el grupo';
+  btn.classList.toggle('active', positionSharingOn);
+}
+async function writeMyPosition(){
+  if(!lastPos || !profile) return;
+  try{
+    const user = await ensureSignedIn();
+    if(!user) return;
+    await fbDb.collection('groups').doc(profile.groupCode).collection('positions').doc(user.uid).set({
+      name: profile.name, lat: lastPos.lat, lon: lastPos.lon,
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+  }catch(e){ /* sin conexión: se reintenta en el próximo tick */ }
+}
+function maybeSharePosition(){
+  if(!positionSharingOn || !lastPos) return;
+  const now = Date.now();
+  if(now - lastShareWrite < 20000) return;
+  lastShareWrite = now;
+  writeMyPosition();
+}
+function updateCompanionMarker(uid, d){
+  if(!map) return;
+  const initial = escapeXml((d.name || '?').trim().charAt(0).toUpperCase() || '?');
+  if(companionMarkers[uid]){
+    companionMarkers[uid].setLatLng([d.lat, d.lon]);
+  } else {
+    const icon = L.divIcon({className:'', html:`<div class="companion-dot">${initial}</div>`, iconSize:[28,28]});
+    companionMarkers[uid] = L.marker([d.lat, d.lon], {icon, zIndexOffset:900}).addTo(map).bindPopup(escapeXml(d.name || 'Compañero'));
+  }
+}
+function listenToCompanions(){
+  if(!profile) return;
+  initFirebase();
+  if(positionsUnsub) positionsUnsub();
+  positionsUnsub = fbDb.collection('groups').doc(profile.groupCode).collection('positions')
+    .onSnapshot(snap => {
+      const seen = new Set();
+      snap.forEach(doc => {
+        if(fbUser && doc.id === fbUser.uid) return; // no pintar mi propio marcador
+        const d = doc.data();
+        const ts = d.updatedAt && d.updatedAt.toMillis ? d.updatedAt.toMillis() : 0;
+        if(Date.now() - ts > 10 * 60 * 1000) return; // más de 10 min sin actualizar: se considera desconectado
+        seen.add(doc.id);
+        updateCompanionMarker(doc.id, d);
+      });
+      Object.keys(companionMarkers).forEach(uid => {
+        if(!seen.has(uid)){ map.removeLayer(companionMarkers[uid]); delete companionMarkers[uid]; }
+      });
+    }, () => {});
+}
+async function toggleShareLocation(){
+  if(!positionSharingOn){
+    if(!profile){ showToast('Crea primero tu perfil'); openRoutesSheet(); return; }
+    positionSharingOn = true;
+    updateShareBtn();
+    listenToCompanions();
+    if(lastPos) writeMyPosition();
+  } else {
+    positionSharingOn = false;
+    updateShareBtn();
+    if(positionsUnsub){ positionsUnsub(); positionsUnsub = null; }
+    Object.values(companionMarkers).forEach(m => map && map.removeLayer(m));
+    companionMarkers = {};
+    if(profile && fbUser){
+      try{ await fbDb.collection('groups').doc(profile.groupCode).collection('positions').doc(fbUser.uid).delete(); }catch(e){}
+    }
+  }
+}
+
 /* ---------- Descarga de mapas offline ---------- */
 function tileXY(lat, lon, z){
   const x = Math.floor((lon+180)/360 * Math.pow(2,z));
@@ -2059,6 +2141,7 @@ function startWatch(){
     applyMapRotation();
     checkRadarAlerts();
     maybeLoadLocalRadars(lastPos.lat, lastPos.lon);
+    maybeSharePosition();
     updateFuelTracking(lastPos.lat, lastPos.lon, estimateSpeedMS(pos));
     checkSpeedWarning(pos);
     maybeLoadMaxspeed();
@@ -2131,6 +2214,7 @@ document.getElementById('btnStop').addEventListener('click', () => {
   if(wakeLock){ wakeLock.release().catch(()=>{}); wakeLock = null; }
   if(fullscreenNav) toggleFullscreenNav();
   if(trackRecording) document.getElementById('btnTrackToggle').click();
+  if(positionSharingOn) toggleShareLocation();
   navPaused = false;
   const pauseBtn = document.getElementById('btnPause');
   pauseBtn.textContent = '⏸️ Pausar navegación';
@@ -2193,6 +2277,7 @@ document.getElementById('btnTrackToggle').addEventListener('click', () => {
   updateTrackUI();
 });
 document.getElementById('btnOpenTracks').addEventListener('click', openTracksSheet);
+document.getElementById('btnShareLocation').addEventListener('click', toggleShareLocation);
 document.getElementById('closeTracks').addEventListener('click', closeTracksSheet);
 document.getElementById('btnSkip').addEventListener('click', () => {
   if(currentIdx < ROUTE.length-1){
