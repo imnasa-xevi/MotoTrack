@@ -528,6 +528,7 @@ let wakeLock = null;
 let map = null, meMarker = null, wpMarkers = [], routeLine = null, baseLineSegments = [];
 let lightTileLayer = null, darkTileLayer = null;
 let fullRouteGeoms = [];
+let singleDestGeom = null; // geometría por carretera de ti hasta el destino, solo para rutas de 1 punto
 let followMode = true;
 let routeModel = null;
 let routedIdx = -1;
@@ -1040,10 +1041,12 @@ function redrawBaseSegments(){
     baseLineSegments.push(seg);
   }
   // Con un solo destino no hay tramo "entre puntos" que colorear (el bucle de
-  // arriba no genera nada). Se dibuja un tramo virtual desde tu posición hasta
-  // ese destino para que el tramo actual también se vea en este caso.
+  // arriba no genera nada). Se dibuja el tramo desde tu posición hasta ese
+  // destino: por carretera si ya se cargó (singleDestGeom), o como línea recta
+  // discontinua mientras tanto para no dejarlo en blanco.
   if(ROUTE.length === 1 && lastPos){
-    const seg = L.polyline([[lastPos.lat, lastPos.lon], [ROUTE[0].lat, ROUTE[0].lon]], {color: '#ff7a45', weight: 6, opacity: .9, dashArray: '2 10'});
+    const coords = singleDestGeom || [[lastPos.lat, lastPos.lon], [ROUTE[0].lat, ROUTE[0].lon]];
+    const seg = L.polyline(coords, {color: '#ff7a45', weight: 6, opacity: .9, dashArray: singleDestGeom ? null : '2 10'});
     seg.addTo(map);
     baseLineSegments.push(seg);
   }
@@ -1055,6 +1058,7 @@ function redrawBaseSegments(){
 async function loadFullRouteGeometry(){
   loadFullRouteGeometry.activeIdAtStart = store.activeId;
   fullRouteGeoms = new Array(Math.max(0, ROUTE.length - 1)).fill(null);
+  singleDestGeom = null;
   const cacheKey = 'routegeo_' + store.activeId;
   try{
     const cached = localStorage.getItem(cacheKey);
@@ -1079,6 +1083,20 @@ async function loadFullRouteGeometry(){
     await sleep(80);
   }
   try{ localStorage.setItem(cacheKey, JSON.stringify(fullRouteGeoms)); }catch(e){}
+
+  // Con un solo destino el único "tramo" es de tu posición actual hasta él.
+  // No se cachea: a diferencia de los tramos entre waypoints fijos, el punto
+  // de partida cambia cada vez que te mueves.
+  if(ROUTE.length === 1 && lastPos){
+    if(store.activeId !== loadFullRouteGeometry.activeIdAtStart) return;
+    try{
+      const r = await fetchOsrmRoute(lastPos, ROUTE[0]);
+      singleDestGeom = r.geometry.coordinates.map(c => [c[1], c[0]]);
+    }catch(e){
+      singleDestGeom = null;
+    }
+    redrawBaseSegments();
+  }
 }
 
 /* ---------- Radares fijos (OpenStreetMap) ---------- */
