@@ -1006,7 +1006,11 @@ function rebuildMapForRoute(){
   // acaba de mostrar. El usuario reactiva "seguir" (🎯) cuando quiera navegar.
   setFollow(false);
 
-  const fitLine = L.polyline(ROUTE.map(w => [w.lat, w.lon]));
+  // Igual que en showFullRoute(): si solo hay un destino guardado, la vista
+  // debe abarcar desde tu posición actual hasta ese destino, no solo el punto.
+  const fitPoints = ROUTE.map(w => [w.lat, w.lon]);
+  if(lastPos) fitPoints.push([lastPos.lat, lastPos.lon]);
+  const fitLine = L.polyline(fitPoints);
   map.fitBounds(fitLine.getBounds(), {padding:[28,28]});
 
   wpMarkers = ROUTE.map(wp => L.circleMarker([wp.lat, wp.lon], {
@@ -1032,6 +1036,14 @@ function redrawBaseSegments(){
     else if(i+1 === currentIdx){ color = '#ff7a45'; weight = 6; opacity = .9; }
     const coords = fullRouteGeoms[i] || [[ROUTE[i].lat, ROUTE[i].lon], [ROUTE[i+1].lat, ROUTE[i+1].lon]];
     const seg = L.polyline(coords, {color, weight, opacity});
+    seg.addTo(map);
+    baseLineSegments.push(seg);
+  }
+  // Con un solo destino no hay tramo "entre puntos" que colorear (el bucle de
+  // arriba no genera nada). Se dibuja un tramo virtual desde tu posición hasta
+  // ese destino para que el tramo actual también se vea en este caso.
+  if(ROUTE.length === 1 && lastPos){
+    const seg = L.polyline([[lastPos.lat, lastPos.lon], [ROUTE[0].lat, ROUTE[0].lon]], {color: '#ff7a45', weight: 6, opacity: .9, dashArray: '2 10'});
     seg.addTo(map);
     baseLineSegments.push(seg);
   }
@@ -1456,7 +1468,12 @@ function setFollow(on){
 function showFullRoute(){
   if(!map) return;
   setFollow(false);
-  const line = L.polyline(ROUTE.map(w => [w.lat, w.lon]));
+  // Se incluye también tu posición actual: si la ruta solo tiene un destino
+  // (o simplemente no has llegado al primero todavía), "toda la ruta" debe
+  // abarcar desde donde estás hasta donde vas, no solo los puntos guardados.
+  const points = ROUTE.map(w => [w.lat, w.lon]);
+  if(lastPos) points.push([lastPos.lat, lastPos.lon]);
+  const line = L.polyline(points);
   map.fitBounds(line.getBounds(), {padding:[28,28]});
 }
 
@@ -2158,6 +2175,7 @@ function startWatch(){
     checkRadarAlerts();
     maybeLoadLocalRadars(lastPos.lat, lastPos.lon);
     maybeSharePosition();
+    maybeEnsureWakeLock();
     updateFuelTracking(lastPos.lat, lastPos.lon, estimateSpeedMS(pos));
     checkSpeedWarning(pos);
     maybeLoadMaxspeed();
@@ -2182,16 +2200,31 @@ async function requestWakeLock(){
     wakeLock = await navigator.wakeLock.request('screen');
     note.textContent = '🔆 Pantalla siempre encendida mientras uses la app';
     wakeLock.addEventListener('release', () => {
-      note.textContent = 'La pantalla puede apagarse (se liberó el bloqueo)';
+      // Importante: sin esto, wakeLock seguía siendo un objeto "no nulo" pero
+      // ya inútil, así que nunca se volvía a pedir hasta que el usuario
+      // tocase algo — la pantalla se acababa apagando sola.
+      wakeLock = null;
+      if(!navPaused) note.textContent = 'Reactivando pantalla encendida…';
     });
   }catch(e){
+    wakeLock = null;
     note.textContent = 'No se pudo mantener la pantalla encendida: ' + e.message;
   }
 }
-document.addEventListener('visibilitychange', async () => {
-  if(wakeLock !== null && document.visibilityState === 'visible'){
-    try{ wakeLock = await navigator.wakeLock.request('screen'); }catch(e){}
-  }
+async function ensureWakeLock(){
+  if(wakeLock || navPaused || watchId === null) return;
+  await requestWakeLock();
+}
+let lastWakeLockCheck = 0;
+function maybeEnsureWakeLock(){
+  if(navPaused || watchId === null) return;
+  const now = Date.now();
+  if(now - lastWakeLockCheck < 15000) return;
+  lastWakeLockCheck = now;
+  ensureWakeLock();
+}
+document.addEventListener('visibilitychange', () => {
+  if(document.visibilityState === 'visible') ensureWakeLock();
 });
 
 /* ---------- Eventos ---------- */
