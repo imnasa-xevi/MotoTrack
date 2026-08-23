@@ -1084,18 +1084,27 @@ async function loadFullRouteGeometry(){
   }
   try{ localStorage.setItem(cacheKey, JSON.stringify(fullRouteGeoms)); }catch(e){}
 
-  // Con un solo destino el único "tramo" es de tu posición actual hasta él.
-  // No se cachea: a diferencia de los tramos entre waypoints fijos, el punto
-  // de partida cambia cada vez que te mueves.
-  if(ROUTE.length === 1 && lastPos){
-    if(store.activeId !== loadFullRouteGeometry.activeIdAtStart) return;
-    try{
-      const r = await fetchOsrmRoute(lastPos, ROUTE[0]);
-      singleDestGeom = r.geometry.coordinates.map(c => [c[1], c[0]]);
-    }catch(e){
-      singleDestGeom = null;
-    }
+  // rebuildMapForRoute() (quien llama a esta función) se ejecuta al activar
+  // la ubicación, ANTES de que llegue la primera posición GPS real. Si aún
+  // no hay lastPos, se deja pendiente: maybeLoadSingleDestGeom() la pedirá
+  // en cuanto llegue la primera posición (ver el watchPosition de startWatch).
+  maybeLoadSingleDestGeom();
+}
+
+let singleDestGeomLoading = false;
+async function maybeLoadSingleDestGeom(){
+  if(ROUTE.length !== 1 || !lastPos || singleDestGeom || singleDestGeomLoading) return;
+  singleDestGeomLoading = true;
+  const activeIdAtStart = store.activeId;
+  try{
+    const r = await fetchOsrmRoute(lastPos, ROUTE[0]);
+    if(store.activeId !== activeIdAtStart) return; // se cambió de ruta mientras se pedía
+    singleDestGeom = r.geometry.coordinates.map(c => [c[1], c[0]]);
     redrawBaseSegments();
+  }catch(e){
+    // sin conexión: se reintentará en el próximo tick de GPS
+  }finally{
+    singleDestGeomLoading = false;
   }
 }
 
@@ -2194,6 +2203,7 @@ function startWatch(){
     maybeLoadLocalRadars(lastPos.lat, lastPos.lon);
     maybeSharePosition();
     maybeEnsureWakeLock();
+    maybeLoadSingleDestGeom();
     updateFuelTracking(lastPos.lat, lastPos.lon, estimateSpeedMS(pos));
     checkSpeedWarning(pos);
     maybeLoadMaxspeed();
