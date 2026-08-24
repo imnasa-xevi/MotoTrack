@@ -220,14 +220,12 @@
   .sheet-head h3{margin:0; font-size:1.05rem;}
   .sheet-close{background:var(--bg2); border:1px solid var(--border); color:var(--text); width:32px; height:32px; border-radius:50%; font-size:1rem; line-height:1;}
 
-  .km-picker-wrap{position:relative; height:180px; overflow:hidden; border-radius:14px; background:var(--card); border:1px solid var(--border);}
-  .km-picker{height:100%; overflow-y:scroll; scroll-snap-type:y mandatory; -webkit-overflow-scrolling:touch; padding:72px 0;}
-  .km-picker::-webkit-scrollbar{display:none;}
-  .km-picker-item{height:36px; display:flex; align-items:center; justify-content:center; font-size:1.05rem; color:var(--muted); scroll-snap-align:center;}
-  .km-picker-item.km-major{font-weight:700; color:var(--text);}
-  .km-picker-item.km-huge{font-weight:800; color:var(--accent); font-size:1.15rem;}
-  .km-picker-highlight{position:absolute; left:10px; right:10px; top:50%; transform:translateY(-18px); height:36px; border-top:1.5px solid var(--accent); border-bottom:1.5px solid var(--accent); pointer-events:none; z-index:1; border-radius:8px;}
-  .km-picker-value{text-align:center; font-size:1.7rem; font-weight:800; margin-top:12px;}
+  .km-display{text-align:center; font-size:2.3rem; font-weight:800; padding:18px 0; background:var(--card); border:1px solid var(--border); border-radius:14px;}
+  .km-display .km-unit{font-size:1.05rem; font-weight:600; color:var(--muted); margin-left:6px;}
+  .km-keypad{display:grid; grid-template-columns:repeat(3, 1fr); gap:10px; margin-top:14px;}
+  .km-key{aspect-ratio:1.6/1; font-size:1.5rem; font-weight:700; border-radius:14px; background:var(--card); border:1px solid var(--border); color:var(--text);}
+  .km-key:active{background:var(--bg2);}
+  .km-key-muted{font-size:1.15rem; color:var(--muted);}
 
   .route-row{display:flex; align-items:center; gap:8px; padding:12px 10px; border-radius:14px; background:var(--card); border:1px solid var(--border); margin-bottom:8px;}
   .route-row.active{border-color:var(--accent);}
@@ -433,12 +431,22 @@
 <div id="kmOverlay" class="overlay hidden">
   <div class="sheet">
     <div class="sheet-head"><h3>Km desde el último repostaje</h3><button class="sheet-close" id="closeKm">✕</button></div>
-    <p style="color:var(--muted); font-size:.82rem; margin:0 0 14px;">Para avisarte cuando te quedes sin gasolina. Desliza hasta el número.</p>
-    <div class="km-picker-wrap">
-      <div class="km-picker-highlight"></div>
-      <div class="km-picker" id="kmPicker"></div>
+    <p style="color:var(--muted); font-size:.82rem; margin:0 0 14px;">Para avisarte cuando te quedes sin gasolina.</p>
+    <div class="km-display" id="kmDisplay">0 <span class="km-unit">km</span></div>
+    <div class="km-keypad" id="kmKeypad">
+      <button class="km-key" data-key="1">1</button>
+      <button class="km-key" data-key="2">2</button>
+      <button class="km-key" data-key="3">3</button>
+      <button class="km-key" data-key="4">4</button>
+      <button class="km-key" data-key="5">5</button>
+      <button class="km-key" data-key="6">6</button>
+      <button class="km-key" data-key="7">7</button>
+      <button class="km-key" data-key="8">8</button>
+      <button class="km-key" data-key="9">9</button>
+      <button class="km-key km-key-muted" data-key="clear">C</button>
+      <button class="km-key" data-key="0">0</button>
+      <button class="km-key km-key-muted" data-key="back">⌫</button>
     </div>
-    <div class="km-picker-value" id="kmPickerValue">0 km</div>
     <button class="btn" id="btnKmConfirm" style="width:100%; margin-top:14px;">Continuar</button>
   </div>
 </div>
@@ -2332,53 +2340,44 @@ document.addEventListener('visibilitychange', () => {
 });
 
 /* ---------- Eventos ---------- */
-/* Selector de km con scroll (0-300), en vez del prompt() nativo bloqueante:
-   además de quedar más cómodo para elegir el número mientras conduces, evita
-   el bug de iOS donde ese diálogo bloqueante dejaba el mapa mal dimensionado
-   al cerrarse (según si llegaba a aparecer el teclado o no). */
-const KM_PICKER_MAX = 300, KM_PICKER_ITEM_H = 36;
+/* Selector de km con teclado numérico grande, en vez del prompt() nativo
+   bloqueante: además de quedar más cómodo para teclear el número mientras
+   conduces (con guantes, botones grandes), evita el bug de iOS donde ese
+   diálogo bloqueante dejaba el mapa mal dimensionado al cerrarse (según si
+   llegaba a aparecer el teclado o no). */
+const KM_MAX_DIGITS = 5; // hasta 99.999 km, de sobra
 function openKmPicker(){
   return new Promise(resolve => {
     const overlay = document.getElementById('kmOverlay');
-    const picker = document.getElementById('kmPicker');
-    const valueEl = document.getElementById('kmPickerValue');
+    const display = document.getElementById('kmDisplay');
+    const keypad = document.getElementById('kmKeypad');
     const closeBtn = document.getElementById('closeKm');
     const confirmBtn = document.getElementById('btnKmConfirm');
 
-    if(!picker.dataset.built){
-      let html = '';
-      for(let i=0;i<=KM_PICKER_MAX;i++){
-        const cls = i % 50 === 0 ? ' km-huge' : (i % 10 === 0 ? ' km-major' : '');
-        html += `<div class="km-picker-item${cls}">${i}</div>`;
-      }
-      picker.innerHTML = html;
-      picker.dataset.built = '1';
-    }
+    let digits = '';
+    const render = () => { display.innerHTML = (digits || '0') + ' <span class="km-unit">km</span>'; };
+    render();
 
-    let selected = 0;
-    const setValue = km => { selected = km; valueEl.textContent = km + ' km'; };
-    setValue(0);
-    picker.scrollTop = 0;
-
-    let scrollTimer = null;
-    function onScroll(){
-      clearTimeout(scrollTimer);
-      scrollTimer = setTimeout(() => {
-        const idx = Math.round(picker.scrollTop / KM_PICKER_ITEM_H);
-        setValue(Math.max(0, Math.min(KM_PICKER_MAX, idx)));
-      }, 80);
+    function onKeyClick(e){
+      const btn = e.target.closest('.km-key');
+      if(!btn) return;
+      const key = btn.dataset.key;
+      if(key === 'clear') digits = '';
+      else if(key === 'back') digits = digits.slice(0, -1);
+      else if(digits.length < KM_MAX_DIGITS) digits += key;
+      render();
     }
-    picker.addEventListener('scroll', onScroll);
+    keypad.addEventListener('click', onKeyClick);
 
     function cleanup(km){
-      picker.removeEventListener('scroll', onScroll);
+      keypad.removeEventListener('click', onKeyClick);
       closeBtn.removeEventListener('click', onClose);
       confirmBtn.removeEventListener('click', onConfirm);
       overlay.classList.add('hidden');
       resolve(km);
     }
     function onClose(){ cleanup(null); }
-    function onConfirm(){ cleanup(selected); }
+    function onConfirm(){ cleanup(digits ? parseInt(digits, 10) : 0); }
     closeBtn.addEventListener('click', onClose);
     confirmBtn.addEventListener('click', onConfirm);
 
