@@ -880,7 +880,7 @@ function buildRouteModel(osrmRoute){
 }
 function drawRouteLine(coords){
   if(routeLine) map.removeLayer(routeLine);
-  routeLine = L.polyline(coords, {color:'#ff7a45', weight:6, opacity:.85}).addTo(map);
+  routeLine = L.polyline(coords, {color:'#22c55e', weight:6, opacity:.85}).addTo(map);
 }
 
 let offRouteState = false;
@@ -1075,8 +1075,10 @@ function redrawBaseSegments(){
   baseLineSegments = [];
   for(let i=0;i<ROUTE.length-1;i++){
     let color = '#5aa9ff', weight = 4, opacity = .7;
-    if(i+1 < currentIdx){ color = '#3ecf8e'; opacity = .55; }
-    else if(i+1 === currentIdx){ color = '#ff7a45'; weight = 6; opacity = .9; }
+    // Gris, no verde: un verde apagado se confunde con el verde del terreno
+    // (bosque/vegetación) del mapa base y el tramo recorrido "desaparecía".
+    if(i+1 < currentIdx){ color = '#94a3b8'; opacity = .75; }
+    else if(i+1 === currentIdx){ color = '#22c55e'; weight = 6; opacity = .9; }
     const coords = fullRouteGeoms[i] || [[ROUTE[i].lat, ROUTE[i].lon], [ROUTE[i+1].lat, ROUTE[i+1].lon]];
     const seg = L.polyline(coords, {color, weight, opacity});
     seg.addTo(map);
@@ -1088,7 +1090,7 @@ function redrawBaseSegments(){
   // discontinua mientras tanto para no dejarlo en blanco.
   if(ROUTE.length === 1 && lastPos){
     const coords = singleDestGeom || [[lastPos.lat, lastPos.lon], [ROUTE[0].lat, ROUTE[0].lon]];
-    const seg = L.polyline(coords, {color: '#ff7a45', weight: 6, opacity: .9, dashArray: singleDestGeom ? null : '2 10'});
+    const seg = L.polyline(coords, {color: '#22c55e', weight: 6, opacity: .9, dashArray: singleDestGeom ? null : '2 10'});
     seg.addTo(map);
     baseLineSegments.push(seg);
   }
